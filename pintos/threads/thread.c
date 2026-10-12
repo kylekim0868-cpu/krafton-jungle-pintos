@@ -470,6 +470,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *); // rsp = t + 오프셋(4096 - 8)
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	/* ✔︎ 필드(base_priority, donations, waiting_lock, donate_elem) 초기화 by 🧝🏼KyleKim */
+	t->base_priority = t->priority;
+	t->waiting_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -649,4 +654,80 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+/* 유효 우선순위를 재계산하는 함수 */
+void thread_recalc_priority(struct thread *t){
+	/* 기존 우선순위 가져오기 */
+	t->priority = t->base_priority;
+
+	struct list_elem *s = list_begin(&t->donations); /* 기부 목록의 첫 번째 원소 꺼내기 */
+
+	/* 기부 목록 수만큼 순회하며 최대 우선순위값 찾아서 기부받은 스레드의 유효 우선순위 갱신 */
+	for(s; s != list_end(&t->donations); s = list_next(s)){
+		struct thread *t_s = list_entry(s, struct thread, donate_elem);
+		if(t->priority < t_s->priority){
+			t->priority = t_s->priority;
+		}
+	}
+}	
+
+/* Lock 획득 후 스레드의 대기 상태 해제하는 함수 */
+void thread_clear_lock_wait(){
+
+}
+
+/* Compares the value of two list elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool donation_priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	const struct thread *thread_a = list_entry(a, struct thread, donate_elem);
+	const struct thread *thread_b = list_entry(b, struct thread, donate_elem);
+	if(thread_a->priority > thread_b->priority){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+/* 우선순위 재계산 + 연쇄 전파용 재귀함수 */
+/* ★ 대기 관계가 순환인 예외 케이스도 고려해야함 */
+void thread_chain(struct thread * donor, struct lock * lock){
+	thread_recalc_priority(donor);
+	/* 종료 조건 → receiver->waiting_lock = NULL(기부받은 스레드가 다른 락을 기다리지 않는다면=없다면) 혹은 → 다음 락의 스레드가 존재하지 않을 경우 */
+	if(donor->waiting_lock == NULL || lock->holder == NULL){
+		return;
+	}
+	struct thread *receiver = lock->holder;
+
+	thread_chain(receiver, receiver->waiting_lock);
+}
+
+
+/* Lock을 기다리는 현재 스레드의 기부 등록과 연쇄 전파를 담당하는 함수 */
+/* 매개변수 의미: struct thread *donor = 기부할 스레드, struct lock *lock = 기부받은 스레드의 락 */
+void thread_donate_on_wait(struct thread *donor, struct lock *lock){
+	/* 기부받을 스레드의 Lock이 걸려있는지 확인 */
+	if(lock->holder == NULL){
+		return; /* Lock이 걸려 있지 않다면 반환 */
+	}
+	struct thread *receiver = lock->holder; /* 기부받을 구조체 포인터 선언 및 할당 */
+	
+	/* 기부를 할 스레드가 없을 때 현재 실행중인 스레도르 초기화 */
+	/* TODO: 현재 thread_currnet()가 문제가 된다. 실행 중인 스레드가 동일하기 때문에 재귀 호출을 계속해도 같은 스레드를 받는다. */
+	donor->waiting_lock = lock; /* receiver의 lock을 참조 */
+
+	/* 인터럽트를 꺼야 하나? */
+
+	/* 현재 스레드 기부받을 스레드의 donations 등록 */
+	list_insert_ordered(&receiver->donations, &donor->donate_elem, donation_priority_higher, NULL); /* 내림차순 정렬 삽입 사용 */
+	/* 연쇄 전파 */
+	thread_chain(receiver, receiver->waiting_lock);
+	
+}
+
+/* 해당 Lock 관련 기부 제거 및 우선순위 재계산 */
+void thread_remove_lock_donations(struct lock *lock){
+
 }
