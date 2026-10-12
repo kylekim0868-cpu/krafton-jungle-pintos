@@ -155,17 +155,20 @@ timer_interrupt (struct intr_frame *args UNUSED) {//중복 함수
 	//->
 	struct list_elem *e = list_begin (&sleep_list);//잠자는 쓰레드 목록을 순회할 때 현재 위치를 가리킨다
 	
-	while (e->next==NULL)/*sleep_list 전체를 순회 종료조건 : */
+    while (e != list_end(&sleep_list)) //list_end에 도달할 때까지 목록 전체를 확인한다(전체 순회)
 	{
-		struct thread *wt = list_entry(list_begin(&sleep_list), struct thread, elem);
-		if(wt->wakeup_t<=ticks)
+        struct thread *wt = list_entry(e, struct thread, elem);//현재 리스트 요소 e가 속한 쓰레드 구조체를 가져온다
+
+        struct list_elem *next = list_next(e);//현재 요소를 제거할 수도 있으므로 다음 요소를 미리 저장(예외처리)
+		if(wt->wakeup_t <= ticks)
 		{
-			e=list_remove(e);
+			e = list_remove(e);
+
 			thread_unblock(wt);
-			
+
 		}else
 		{
-			e=list_next(e);
+			e = next;
 		}
 
 	}
