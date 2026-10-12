@@ -188,6 +188,12 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	printf("락 등록 시작");
+	// Lock 소유자가 존재하면 기부 관계를 등록하고, 필요할 때만 소유자의 우선순위를 높이는 방식. 실질적인 기부 작업이 이루어지는 곳!!!	
+	if (lock->holder != NULL) {
+		thread_donate_on_wait(thread_current(), lock);
+	}
+	printf("락 등록 성공");
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 }
@@ -219,9 +225,13 @@ lock_try_acquire (struct lock *lock) {
    handler. */
 void
 lock_release (struct lock *lock) {
-	ASSERT (lock != NULL);
-	ASSERT (lock_held_by_current_thread (lock));
+	ASSERT (lock != NULL); // 락이 정말 존재하는가?
+	ASSERT (lock_held_by_current_thread (lock)); // 현재 스레드가 정말 이 Lock을 소유하고 있는가?
 
+	printf("락 해제 시도");
+	thread_remove_lock_donations(lock);
+	printf("락 해제 성공");
+	// thread_clear_lock_wait(); // 현재 스레드의 락 정보를 null로 변경
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);
 }

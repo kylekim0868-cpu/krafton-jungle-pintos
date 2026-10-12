@@ -659,6 +659,9 @@ allocate_tid (void) {
 /* 유효 우선순위를 재계산하는 함수 */
 void thread_recalc_priority(struct thread *t){
 	/* 기존 우선순위 가져오기 */
+	// 예외처리. 만약에 thread 구조체가 NULL을 보낸다면? 
+	if (t == NULL) return;
+	
 	t->priority = t->base_priority;
 
 	struct list_elem *s = list_begin(&t->donations); /* 기부 목록의 첫 번째 원소 꺼내기 */
@@ -671,11 +674,6 @@ void thread_recalc_priority(struct thread *t){
 		}
 	}
 }	
-
-/* Lock 획득 후 스레드의 대기 상태 해제하는 함수 */
-void thread_clear_lock_wait(){
-
-}
 
 /* Compares the value of two list elements A and B, given
    auxiliary data AUX.  Returns true if A is less than B, or
@@ -727,7 +725,49 @@ void thread_donate_on_wait(struct thread *donor, struct lock *lock){
 	
 }
 
-/* 해당 Lock 관련 기부 제거 및 우선순위 재계산 */
-void thread_remove_lock_donations(struct lock *lock){
+// Lock 획득 후 대기 상태 해제
+// 현재 스레드의 락 정보만을 NULL로 변경
+void
+thread_clear_lock_wait(){
+	thread_current()-> waiting_lock = NULL; // 현재 스레드가 기다리고 있는 락의 정보를 비움
+}
 
+// 해당 Lock 관련 기부 제거 및 우선순위 재계산
+//LOCK 해제 직전, 해당 Lock의 기부자 제거 + 우선순위 재계산
+void 
+thread_remove_lock_donations(lock) {
+	// 현재 도네이션 리스트에서 시작정보를 가져온다.
+	struct list_elem *e = list_begin (&thread_current()->donations);
+	
+	// donated_list 한바퀴 돈다
+	while (e != list_end (&thread_current()->donations)) {
+		struct thread *thread_a = list_entry(e, struct thread, donate_elem); // elem 의 값을 통해 쓰레드 정보를 불러온다.
+	
+	// 만약 e의 waiting_lock의 값이 lock 정보와 동일한지 검사. 동일하다면 현재 e의 락이 풀렸다는 뜻이다.
+		if (thread_a->waiting_lock == lock) {
+			// e의 waiting_lock제거.
+			e = list_remove(e);
+			thread_a->waiting_lock = NULL;
+
+		} else { // 이 Lock이 아니라 다른 lock을 관리하는 쓰레드라면, 다음으로 넘어감
+			e = list_next(e);
+		}
+	}
+	printf("와일문 끝");
+
+	// 1개 이상 남아있어야 우선순위 재계산을 한다. 예외처리. 
+	if (list_empty(&thread_current()->donations)) {
+		return;
+	}
+	struct list_elem *start = list_begin (&thread_current()->donations);
+	struct thread *start_thread = list_entry(start, struct thread, donate_elem);
+	printf("우선순위 재계산 시작하겠습니다");
+	printf("[Donation] name=%s, priority=%d, real_priority=%d\n",
+       start_thread->name,
+       start_thread->priority,
+       start_thread->base_priority);
+
+	// 우선순위 재계산 -> 최댓값을 찾는 함수 호출
+	thread_recalc_priority(start_thread); // 호출만으로 donation의 최댓값을 구할 수 있다.
+	printf("끝");
 }
