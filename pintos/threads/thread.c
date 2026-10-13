@@ -360,6 +360,7 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	thread_current ()->base_priority = new_priority;
 	/* TODO: ready-list 목록이 비어 있다면 우선순위 비교 로직 Skip */
 	if(!list_empty(&ready_list))
 	{
@@ -690,15 +691,15 @@ bool donation_priority_higher(const struct list_elem *a, const struct list_elem 
 
 /* 우선순위 재계산 + 연쇄 전파용 재귀함수 */
 /* ★ 대기 관계가 순환인 예외 케이스도 고려해야함 */
-void thread_chain(struct thread * donor, struct lock * lock){
-	thread_recalc_priority(donor);
+void thread_chain(struct thread * receiver, struct lock * lock){
+	thread_recalc_priority(receiver);
 	/* 종료 조건 → receiver->waiting_lock = NULL(기부받은 스레드가 다른 락을 기다리지 않는다면=없다면) 혹은 → 다음 락의 스레드가 존재하지 않을 경우 */
-	if(donor->waiting_lock == NULL || lock->holder == NULL){
+	if(receiver->waiting_lock == NULL  || lock->holder == NULL){
 		return;
 	}
-	struct thread *receiver = lock->holder;
+	struct thread *donor = lock->holder;
 
-	thread_chain(receiver, receiver->waiting_lock);
+	thread_chain(donor, donor->waiting_lock);
 }
 
 
@@ -774,7 +775,7 @@ void thread_wake_up(){
 	if(list_empty(&ready_list)){
 		return;
 	}
-	/* 이미 내림차순으로 정렬된 READY 리스트 맨 앞 값의 우선순위가 실행줒인 스레드의 우선순위보다 크다면 선점 */
+	/* 이미 내림차순으로 정렬된 READY 리스트 맨 앞 값의 우선순위가 실행중인 스레드의 우선순위보다 크다면 선점 */
 	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
 	if(t->priority > thread_current()->priority){
 		thread_yield();
