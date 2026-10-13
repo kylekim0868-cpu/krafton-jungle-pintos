@@ -93,6 +93,12 @@ struct thread {
 	char name[16];                      /* Name (for debugging purposes). */
 	int priority;                       /* Priority. */
 
+	/* ✔︎ 필드 추가 by 🧝🏼KyleKim */
+	int base_priority; /* 기본 우선순위 ✔︎ 단, 기존 필드인 priority를 유효 우선순위의 저장 변수로 활용 */
+	struct lock *waiting_lock; /* 현재 기다리는 Lock 참조 */
+	struct list donations; /* 기부자 목록 관리 */
+	struct list_elem donate_elem; /* 기부자 목록용 list_elem ★ 기부용 list_elem을 만든 이유는 한 스레드가 동시에 락 대기목록/우선순위 기부목록에 저장되어야 하기 때문이다 */
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
@@ -143,5 +149,12 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+/* 새로 정의한 함수 */
+void thread_wake_up(void);
+void thread_remove_lock_donations(struct lock *lock);
+void thread_clear_lock_wait(void);
+void thread_donate_on_wait(struct thread *donor, struct lock *lock);
+bool priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux);
 
 #endif /* threads/thread.h */
