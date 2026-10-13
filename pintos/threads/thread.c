@@ -360,6 +360,7 @@ thread_yield (void) {
 void
 thread_set_priority (int new_priority) {
 	thread_current ()->priority = new_priority;
+	thread_current ()->base_priority = new_priority;
 	/* TODO: ready-list 목록이 비어 있다면 우선순위 비교 로직 Skip */
 	if(!list_empty(&ready_list))
 	{
@@ -470,6 +471,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *); // rsp = t + 오프셋(4096 - 8)
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	/* ✔︎ 필드(base_priority, donations, waiting_lock, donate_elem) 초기화 by 🧝🏼KyleKim */
+	t->base_priority = t->priority;
+	t->waiting_lock = NULL;
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -649,4 +655,129 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+/* 유효 우선순위를 재계산하는 함수 */
+void thread_recalc_priority(struct thread *t){
+	/* 기존 우선순위 가져오기 */
+	// 예외처리. 만약에 thread 구조체가 NULL을 보낸다면? 
+	if (t == NULL) return;
+	
+	t->priority = t->base_priority;
+
+	struct list_elem *s = list_begin(&t->donations); /* 기부 목록의 첫 번째 원소 꺼내기 */
+	/* 기부 목록 수만큼 순회하며 최대 우선순위값 찾아서 기부받은 스레드의 유효 우선순위 갱신 */
+	for(s; s != list_end(&t->donations); s = list_next(s)){
+		struct thread *t_s = list_entry(s, struct thread, donate_elem);
+		if(t->priority < t_s->priority){
+			t->priority = t_s->priority;
+		}
+	}
+}	
+
+/* Compares the value of two list elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool donation_priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	const struct thread *thread_a = list_entry(a, struct thread, donate_elem);
+	const struct thread *thread_b = list_entry(b, struct thread, donate_elem);
+	if(thread_a->priority > thread_b->priority){
+		return true;
+	}else{
+		return false;
+	}
+}
+
+/* 우선순위 재계산 + 연쇄 전파용 재귀함수 */
+/* ★ 대기 관계가 순환인 예외 케이스도 고려해야함 */
+void thread_chain(struct thread * receiver, struct lock * lock){
+	thread_recalc_priority(receiver);
+	/* 종료 조건 → receiver->waiting_lock = NULL(기부받은 스레드가 다른 락을 기다리지 않는다면=없다면) 혹은 → 다음 락의 스레드가 존재하지 않을 경우 */
+	if(receiver->waiting_lock == NULL  || lock->holder == NULL){
+		return;
+	}
+	struct thread *donor = lock->holder;
+
+	thread_chain(donor, donor->waiting_lock);
+}
+
+
+/* Lock을 기다리는 현재 스레드의 기부 등록과 연쇄 전파를 담당하는 함수 */
+/* 매개변수 의미: struct thread *donor = 기부할 스레드, struct lock *lock = 기부받은 스레드의 락 */
+void thread_donate_on_wait(struct thread *donor, struct lock *lock){
+	/* 기부받을 스레드의 Lock이 걸려있는지 확인 */
+	if(lock->holder == NULL){
+		return; /* Lock이 걸려 있지 않다면 반환 */
+	}
+	struct thread *receiver = lock->holder; /* 기부받을 구조체 포인터 선언 및 할당 */
+	
+	/* 기부를 할 스레드가 없을 때 현재 실행중인 스레도르 초기화 */
+	/* TODO: 현재 thread_currnet()가 문제가 된다. 실행 중인 스레드가 동일하기 때문에 재귀 호출을 계속해도 같은 스레드를 받는다. */
+	donor->waiting_lock = lock; /* receiver의 lock을 참조 */
+
+	/* 인터럽트를 꺼야 하나? */
+
+	/* 현재 스레드 기부받을 스레드의 donations 등록 */
+	list_insert_ordered(&receiver->donations, &donor->donate_elem, donation_priority_higher, NULL); /* 내림차순 정렬 삽입 사용 */
+
+	/* 연쇄 전파 */
+	thread_chain(receiver, receiver->waiting_lock);
+	
+}
+
+// Lock 획득 후 대기 상태 해제
+// 현재 스레드의 락 정보만을 NULL로 변경
+void
+thread_clear_lock_wait(){
+	thread_current()-> waiting_lock = NULL; // 현재 스레드가 기다리고 있는 락의 정보를 비움
+}
+
+// 해당 Lock 관련 기부 제거 및 우선순위 재계산
+//LOCK 해제 직전, 해당 Lock의 기부자 제거 + 우선순위 재계산
+void 
+thread_remove_lock_donations(struct lock *lock) {
+	// 현재 도네이션 리스트에서 시작정보를 가져온다.
+	struct list_elem *e = list_begin (&thread_current()->donations);
+	
+	// donated_list 한바퀴 돈다
+	while (e != list_end (&thread_current()->donations)) {
+		struct thread *thread_a = list_entry(e, struct thread, donate_elem); // elem 의 값을 통해 쓰레드 정보를 불러온다.
+	
+	// 만약 e의 waiting_lock의 값이 lock 정보와 동일한지 검사. 동일하다면 현재 e의 락이 풀렸다는 뜻이다.
+		if (thread_a->waiting_lock == lock) {
+			// e의 waiting_lock제거.
+			e = list_remove(e);
+			thread_a->waiting_lock = NULL;
+
+		} else { // 이 Lock이 아니라 다른 lock을 관리하는 쓰레드라면, 다음으로 넘어감
+			e = list_next(e);
+		}
+	}
+
+	// 1개 이상 남아있어야 우선순위 재계산을 한다. 예외처리. 
+	if (list_empty(&thread_current()->donations)) {
+		thread_current()->priority = thread_current()->base_priority; // 기부 배열이 비어있을 경우 본인의 기본 우선순위를 다시 할당
+		return;
+	}
+	// struct list_elem *start = list_begin (&thread_current()->donations);
+	// struct thread *start_thread = list_entry(start, struct thread, donate_elem);
+
+	// 우선순위 재계산 -> 최댓값을 찾는 함수 호출
+	thread_recalc_priority(thread_current()); // 호출만으로 donation의 최댓값을 구할 수 있다.
+}
+
+/* READY 리스트 중 스레드가 우선순위가 가장 높다면 해당 스레드 호출하는 함수 */
+void thread_wake_up(){
+	if(intr_context()){
+		return;
+	}
+	if(list_empty(&ready_list)){
+		return;
+	}
+	/* 이미 내림차순으로 정렬된 READY 리스트 맨 앞 값의 우선순위가 실행중인 스레드의 우선순위보다 크다면 선점 */
+	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+	if(t->priority > thread_current()->priority){
+		thread_yield();
+	}
 }
