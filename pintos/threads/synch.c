@@ -31,7 +31,6 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
-
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -66,7 +65,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_higher, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -112,8 +111,11 @@ sema_up (struct semaphore *sema) {
 	if (!list_empty (&sema->waiters))
 		thread_unblock (list_entry (list_pop_front (&sema->waiters),
 					struct thread, elem));
+
 	sema->value++;
 	intr_set_level (old_level);
+
+	thread_wake_up();
 }
 
 static void sema_test_helper (void *sema_);
@@ -188,12 +190,10 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
-	printf("락 등록 시작");
 	// Lock 소유자가 존재하면 기부 관계를 등록하고, 필요할 때만 소유자의 우선순위를 높이는 방식. 실질적인 기부 작업이 이루어지는 곳!!!	
 	if (lock->holder != NULL) {
 		thread_donate_on_wait(thread_current(), lock);
 	}
-	printf("락 등록 성공");
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 }
@@ -228,9 +228,7 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL); // 락이 정말 존재하는가?
 	ASSERT (lock_held_by_current_thread (lock)); // 현재 스레드가 정말 이 Lock을 소유하고 있는가?
 
-	printf("락 해제 시도");
 	thread_remove_lock_donations(lock);
-	printf("락 해제 성공");
 	// thread_clear_lock_wait(); // 현재 스레드의 락 정보를 null로 변경
 	lock->holder = NULL;
 	sema_up (&lock->semaphore);

@@ -150,4 +150,11 @@ int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
 
+/* 새로 정의한 함수 */
+void thread_wake_up(void);
+void thread_remove_lock_donations(struct lock *lock);
+void thread_clear_lock_wait(void);
+void thread_donate_on_wait(struct thread *donor, struct lock *lock);
+bool priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux);
+
 #endif /* threads/thread.h */

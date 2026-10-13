@@ -665,7 +665,6 @@ void thread_recalc_priority(struct thread *t){
 	t->priority = t->base_priority;
 
 	struct list_elem *s = list_begin(&t->donations); /* 기부 목록의 첫 번째 원소 꺼내기 */
-
 	/* 기부 목록 수만큼 순회하며 최대 우선순위값 찾아서 기부받은 스레드의 유효 우선순위 갱신 */
 	for(s; s != list_end(&t->donations); s = list_next(s)){
 		struct thread *t_s = list_entry(s, struct thread, donate_elem);
@@ -720,6 +719,7 @@ void thread_donate_on_wait(struct thread *donor, struct lock *lock){
 
 	/* 현재 스레드 기부받을 스레드의 donations 등록 */
 	list_insert_ordered(&receiver->donations, &donor->donate_elem, donation_priority_higher, NULL); /* 내림차순 정렬 삽입 사용 */
+
 	/* 연쇄 전파 */
 	thread_chain(receiver, receiver->waiting_lock);
 	
@@ -735,7 +735,7 @@ thread_clear_lock_wait(){
 // 해당 Lock 관련 기부 제거 및 우선순위 재계산
 //LOCK 해제 직전, 해당 Lock의 기부자 제거 + 우선순위 재계산
 void 
-thread_remove_lock_donations(lock) {
+thread_remove_lock_donations(struct lock *lock) {
 	// 현재 도네이션 리스트에서 시작정보를 가져온다.
 	struct list_elem *e = list_begin (&thread_current()->donations);
 	
@@ -753,21 +753,30 @@ thread_remove_lock_donations(lock) {
 			e = list_next(e);
 		}
 	}
-	printf("와일문 끝");
 
 	// 1개 이상 남아있어야 우선순위 재계산을 한다. 예외처리. 
 	if (list_empty(&thread_current()->donations)) {
+		thread_current()->priority = thread_current()->base_priority; // 기부 배열이 비어있을 경우 본인의 기본 우선순위를 다시 할당
 		return;
 	}
-	struct list_elem *start = list_begin (&thread_current()->donations);
-	struct thread *start_thread = list_entry(start, struct thread, donate_elem);
-	printf("우선순위 재계산 시작하겠습니다");
-	printf("[Donation] name=%s, priority=%d, real_priority=%d\n",
-       start_thread->name,
-       start_thread->priority,
-       start_thread->base_priority);
+	// struct list_elem *start = list_begin (&thread_current()->donations);
+	// struct thread *start_thread = list_entry(start, struct thread, donate_elem);
 
 	// 우선순위 재계산 -> 최댓값을 찾는 함수 호출
-	thread_recalc_priority(start_thread); // 호출만으로 donation의 최댓값을 구할 수 있다.
-	printf("끝");
+	thread_recalc_priority(thread_current()); // 호출만으로 donation의 최댓값을 구할 수 있다.
+}
+
+/* READY 리스트 중 스레드가 우선순위가 가장 높다면 해당 스레드 호출하는 함수 */
+void thread_wake_up(){
+	if(intr_context()){
+		return;
+	}
+	if(list_empty(&ready_list)){
+		return;
+	}
+	/* 이미 내림차순으로 정렬된 READY 리스트 맨 앞 값의 우선순위가 실행줒인 스레드의 우선순위보다 크다면 선점 */
+	struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+	if(t->priority > thread_current()->priority){
+		thread_yield();
+	}
 }
