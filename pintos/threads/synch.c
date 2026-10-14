@@ -260,6 +260,27 @@ cond_init (struct condition *cond) {
 	list_init (&cond->cond_waiters);
 }
 
+/* Compares the value of two list elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool cond_priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	const struct semaphore_elem *thread_a = list_entry(a, struct semaphore_elem, elem);
+	const struct semaphore_elem *thread_b = list_entry(b, struct semaphore_elem, elem);
+	
+	const struct list s_l_w_a = thread_a->semaphore.sema_waiters;
+	const struct list s_l_w_b = thread_b->semaphore.sema_waiters;
+	const struct list_elem *t_a = list_begin(&s_l_w_a);
+	const struct list_elem *t_b = list_begin(&s_l_w_b);
+	const struct thread *tmp_t_a = list_entry(t_a, struct thread, elem);
+	const struct thread *tmp_t_b = list_entry(t_b, struct thread, elem);
+	if(tmp_t_a->priority > tmp_t_b->priority){
+		return true;
+	}else{
+		return false;
+	}
+}
+
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -290,12 +311,13 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0); /* 이게 무슨 의미지? */
-	list_push_back (&cond->cond_waiters, &waiter.elem); 
+	// list_push_back (&cond->cond_waiters, &waiter.elem); 
 	/* 
 		priority-condvar.c 테스트 코드의 스레드 생성 흐름대로 살펴본다면 23,22,21
 		그러면 현재 &cond->cond_waiters = {23, 22, 21.. } 순으로 삽입된다.	
 	*/
-	
+
+	list_insert_ordered(&cond->cond_waiters, &waiter.elem, cond_priority_higher, NULL);
 	lock_release (lock); /* condition의 대기 목록에 추가되었기 때문에 Lock을 해제한다. */
 
 	sema_down (&waiter.semaphore); /* 이게 무슨 의미지? */
