@@ -359,7 +359,13 @@ thread_yield (void) {
 /* [SHARED] Priority/MLFQS: 모드별 우선순위 변경과 변경 후 선점 처리 검토. Jira: KAN-78 */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+    // 현재 스레드가 우선순위를 기부받고 있는지 확인한다.
+    // 기부받은 우선순위가 없다면, 요청한 우선순위로 즉시 변경할 수 있다.
+    // 반면 기부받은 우선순위가 있다면, 이를 임의로 변경할 경우
+    // 기부를 통해 높아진 우선순위가 사라질 수 있으므로 즉시 변경하지 않는다.
+	if (list_empty(&thread_current()->donations)) {
+		thread_current ()->priority = new_priority;
+	}
 	thread_current ()->base_priority = new_priority;
 	/* TODO: ready-list 목록이 비어 있다면 우선순위 비교 로직 Skip */
 	if(!list_empty(&ready_list))

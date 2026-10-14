@@ -45,7 +45,7 @@ sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
 
 	sema->value = value;
-	list_init (&sema->waiters);
+	list_init (&sema->sema_waiters);
 }
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
@@ -65,8 +65,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();//인터럽트 끄기
 	while (sema->value == 0) {
-		//이전에 기다리는 세마포어
-		list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_higher, NULL);
+		list_insert_ordered(&sema->sema_waiters, &thread_current()->elem, priority_higher, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -286,7 +285,43 @@ void
 cond_init (struct condition *cond) {
 	ASSERT (cond != NULL);
 
-	list_init (&cond->waiters);
+	list_init (&cond->cond_waiters);
+}
+
+/* Compares the value of two list elements A and B, given
+   auxiliary data AUX.  Returns true if A is less than B, or
+   false if A is greater than or equal to B. */
+bool cond_priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	/* condition.waiters의 저장되어 있는 sema_elem (a, b)을 elem을 통해 추출*/
+	const struct semaphore_elem *sema_elem_a = list_entry(a, struct semaphore_elem, elem);
+	const struct semaphore_elem *sema_elem_b = list_entry(b, struct semaphore_elem, elem);
+	
+	/* condition.waiters 리스트가 비어 있을 시 */
+	// if(list_empty(&sema_elem_a->semaphore.sema_waiters) || list_empty(&sema_elem_b->semaphore.sema_waiters)){
+	// 	return true;
+	// }
+
+	const struct list sema_wait_list_a = sema_elem_a->semaphore.sema_waiters; /* sema_elem_a의 waiters 중 최고 우선순위 스레드를 가져와 비교 */
+	// const struct list_elem *s = list_begin(&sema_wait_list_a);
+	// for(s; s != list_end(&sema_wait_list_a); s = list_next(s)){
+	// 	struct thread *t = list_entry(s, struct thread, elem);
+	// 	struct thread *next_t = list_entry(list_next(s), struct thread, elem);
+	// 	if(t->priority < next_t->priority){
+			
+	// 	}
+	// }
+	const struct list sema_wait_list_b = sema_elem_b->semaphore.sema_waiters; /* sema_elem_b의 waiters 중 최고 우선순위 스레드를 가져와 비교 */
+	const struct list_elem *list_elem_a = list_begin(&sema_wait_list_a);
+	const struct list_elem *list_elem_b = list_begin(&sema_wait_list_b);
+	const struct thread *thread_a = list_entry(list_elem_a, struct thread, elem);
+	const struct thread *thread_b = list_entry(list_elem_b, struct thread, elem);
+
+	if(thread_a->priority > thread_b->priority){
+		return true;
+	}else{
+		return false;
+	}
 }
 
 /* Atomically releases LOCK and waits for COND to be signaled by
@@ -318,10 +353,16 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
-	lock_release (lock);
-	sema_down (&waiter.semaphore);
+	sema_init (&waiter.semaphore, 0); /* 이게 무슨 의미지? */
+	list_push_back (&cond->cond_waiters, &waiter.elem); 
+	/* 
+		priority-condvar.c 테스트 코드의 스레드 생성 흐름대로 살펴본다면 23,22,21
+		그러면 현재 &cond->cond_waiters = {23, 22, 21.. } 순으로 삽입된다.	
+	*/
+
+	// list_insert_ordered(&cond->cond_waiters, &waiter.elem, cond_priority_higher, NULL);
+	lock_release (lock); /* condition의 대기 목록에 추가되었기 때문에 Lock을 해제한다. */
+	sema_down (&waiter.semaphore); /* 이게 무슨 의미지? */
 	lock_acquire (lock);
 }
 
@@ -339,8 +380,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
+	/* cond_waiters 리스트 내림차순 정렬 */
+	list_sort(&cond->cond_waiters, cond_priority_higher, NULL);
+
+	if (!list_empty (&cond->cond_waiters))
+		sema_up (&list_entry (list_pop_front (&cond->cond_waiters),
 					struct semaphore_elem, elem)->semaphore);
 }
 
@@ -355,6 +399,6 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 	ASSERT (cond != NULL);
 	ASSERT (lock != NULL);
 
-	while (!list_empty (&cond->waiters))
+	while (!list_empty (&cond->cond_waiters))
 		cond_signal (cond, lock);
 }
