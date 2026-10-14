@@ -109,11 +109,11 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();//인터럽트 끄기
-	if (!list_empty (&sema->waiters)){
+	if (!list_empty (&sema->sema_waiters)){
 		//대기목록이 비어있지 않다면
 	/* 현재는 목록의 첫 번째 대기자를 우선 후보로 삼는다 (가장높은 우선순위)
     뒤의 대기자들과 비교해 더 높은 우선순위가 있는지 찾을 때 기준점으로 사용 */	
-	struct list_elem *best_e=list_begin(&sema->waiters);
+	struct list_elem *best_e=list_begin(&sema->sema_waiters);
 
 	/* 리스트 요소(best_e)가 들어 있는 thread 구조체를 찾아 포인터로 가져온다 */
 	//best_t : 최선 후보
@@ -122,7 +122,7 @@ sema_up (struct semaphore *sema) {
 	/* 첫 번째 후보 다음 요소부터 목록 끝까지 확인한다. */
 	struct list_elem *e = list_next(best_e);
 
-while (e != list_end (&sema->waiters)) {
+while (e != list_end (&sema->sema_waiters)) {
     /* 현재 리스트 요소가 가리키는 대기 스레드를 가져온다. */
     struct thread *cd = list_entry(e, struct thread, elem);
 
