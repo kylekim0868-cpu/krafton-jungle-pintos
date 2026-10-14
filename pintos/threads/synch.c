@@ -289,11 +289,16 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->cond_waiters, &waiter.elem);
+	sema_init (&waiter.semaphore, 0); /* 이게 무슨 의미지? */
+	list_push_back (&cond->cond_waiters, &waiter.elem); 
+	/* 
+		priority-condvar.c 테스트 코드의 스레드 생성 흐름대로 살펴본다면 23,22,21
+		그러면 현재 &cond->cond_waiters = {23, 22, 21.. } 순으로 삽입된다.	
+	*/
 	
-	lock_release (lock);
-	sema_down (&waiter.semaphore);
+	lock_release (lock); /* condition의 대기 목록에 추가되었기 때문에 Lock을 해제한다. */
+
+	sema_down (&waiter.semaphore); /* 이게 무슨 의미지? */
 	lock_acquire (lock);
 }
 
