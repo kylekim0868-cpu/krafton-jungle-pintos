@@ -45,7 +45,7 @@ sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
 
 	sema->value = value;
-	list_init (&sema->waiters);
+	list_init (&sema->sema_waiters);
 }
 
 /* Down or "P" operation on a semaphore.  Waits for SEMA's value
@@ -65,7 +65,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_insert_ordered(&sema->waiters, &thread_current()->elem, priority_higher, NULL);
+		list_insert_ordered(&sema->sema_waiters, &thread_current()->elem, priority_higher, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -108,8 +108,8 @@ sema_up (struct semaphore *sema) {
 	ASSERT (sema != NULL);
 
 	old_level = intr_disable ();
-	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
+	if (!list_empty (&sema->sema_waiters))
+		thread_unblock (list_entry (list_pop_front (&sema->sema_waiters),
 					struct thread, elem));
 
 	sema->value++;
@@ -257,7 +257,7 @@ void
 cond_init (struct condition *cond) {
 	ASSERT (cond != NULL);
 
-	list_init (&cond->waiters);
+	list_init (&cond->cond_waiters);
 }
 
 /* Atomically releases LOCK and waits for COND to be signaled by
@@ -290,7 +290,8 @@ cond_wait (struct condition *cond, struct lock *lock) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	sema_init (&waiter.semaphore, 0);
-	list_push_back (&cond->waiters, &waiter.elem);
+	list_push_back (&cond->cond_waiters, &waiter.elem);
+	
 	lock_release (lock);
 	sema_down (&waiter.semaphore);
 	lock_acquire (lock);
@@ -310,8 +311,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (!intr_context ());
 	ASSERT (lock_held_by_current_thread (lock));
 
-	if (!list_empty (&cond->waiters))
-		sema_up (&list_entry (list_pop_front (&cond->waiters),
+	if (!list_empty (&cond->cond_waiters))
+		sema_up (&list_entry (list_pop_front (&cond->cond_waiters),
 					struct semaphore_elem, elem)->semaphore);
 }
 
@@ -326,6 +327,6 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 	ASSERT (cond != NULL);
 	ASSERT (lock != NULL);
 
-	while (!list_empty (&cond->waiters))
+	while (!list_empty (&cond->cond_waiters))
 		cond_signal (cond, lock);
 }
