@@ -1,4 +1,4 @@
-# 🖥️ Pintos Project 1 · Threads
+# 🖥️ Pintos Project 2 · Threads
 
 KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝트입니다.
 
@@ -13,8 +13,8 @@ KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝�
 | 프로필 | 이름 | GitHub |
 |:---:|:---:|:---:|
 | <img src="https://github.com/kylekim0868-cpu.png" width="80" height="80"> | 김영민 | [@kylekim0868-cpu](https://github.com/kylekim0868-cpu) |
-| <img src="https://github.com/picky232.png" width="80" height="80"> | 국환 | [@Leo-2894](https://github.com/picky232) |
-| <img src="https://github.com/xi.crebig.png" width="80" height="80"> | 신지호 | [@soheesgit](https://github.com/xi.crebig) |
+| <img src="https://github.com/xi.crebig.png" width="80" height="80"> | 국환 | [xi.crebig](https://github.com/xi.crebig) |
+| <img src="https://github.com/picky232.png" width="80" height="80"> | 신지호 | [@picky232](https://github.com/picky232) |
 ## 🛠️ 개발 환경
 
 | 항목 | 환경 |
@@ -49,6 +49,8 @@ KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝�
 - 설계 내용과 코드 분석 자료는 팀 문서에 기록합니다.
 - 브랜치 이름과 PR 제목에 관련 Jira 이슈 키를 포함합니다.
 - 작업 분담 및 일정 변경 사항은 Jira에 반영합니다.
+
+📌 **[Jira 프로젝트 보드 확인하기](https://kylekim0868.atlassian.net/jira/software/projects/SOT/boards/5?filter=&groupBy=none)**
 
 ### 코드 리뷰 및 병합
 
