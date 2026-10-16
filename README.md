@@ -1,10 +1,10 @@
 # 🖥️ Pintos Project 1 · Threads
 
-KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입니다.
+KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝트입니다.
 
 ## 🎯 프로젝트 목표
 
-- Project 1의 모든 필수 요구사항 구현
+- Project 2의 모든 필수 요구사항 구현
 - 최종 `main` 브랜치에서 필수 테스트 통과
 - 구현 과정과 트러블슈팅을 정리하여 주간 공유 발표 진행
 
@@ -13,8 +13,8 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 | 프로필 | 이름 | GitHub |
 |:---:|:---:|:---:|
 | <img src="https://github.com/kylekim0868-cpu.png" width="80" height="80"> | 김영민 | [@kylekim0868-cpu](https://github.com/kylekim0868-cpu) |
-| <img src="https://github.com/Leo-2894.png" width="80" height="80"> | 김도영 | [@Leo-2894](https://github.com/Leo-2894) |
-| <img src="https://github.com/soheesgit.png" width="80" height="80"> | 문소희 | [@soheesgit](https://github.com/soheesgit) |
+| <img src="https://github.com/picky232.png" width="80" height="80"> | 국환 | [@Leo-2894](https://github.com/picky232) |
+| <img src="https://github.com/xi.crebig.png" width="80" height="80"> | 신지호 | [@soheesgit](https://github.com/xi.crebig) |
 ## 🛠️ 개발 환경
 
 | 항목 | 환경 |
@@ -34,7 +34,8 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 
 - 설계 방향과 공통 자료구조를 논의한 후 구현을 분담합니다.
 - 작업별 브랜치에서 개발하고 Pull Request(PR)를 통해 코드 리뷰를 요청합니다.
-- 팀원 간 리뷰와 합의를 거친 코드만 `main` 브랜치에 병합합니다.
+- 팀원 간 리뷰와 합의를 거친 코드만 `develop` 브랜치에 병합합니다.
+- `develop`에서 병합한 코드들의 통합 테스트를 모두 거친 후 `main` 브랜치에 병합합니다.
 - 매일 코어타임에 작업 진행 상황과 PR을 함께 확인합니다.
 - 세부 개발 규칙은 팀 개발 규칙 문서를 따릅니다.
 
@@ -62,6 +63,15 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 > 브랜치 네이밍, 커밋 메시지, PR 작성 및 병합 규칙은
 > [팀 개발 규칙](./pintos/README.md)을 참고합니다.
 
+## 🧪 테스트 결과
+
+| Project | Score | Details |
+|---------|-------|---------|
+| Threads | 32/32 | [상세 결과](docs/tests/project1-threads.md) |
+| User Programs | 미검증 | [상세 결과](docs/tests/project2-user-program.md) |
+| Virtual Memory | 미검증 | [상세 결과](docs/tests/project3-virtual-memory.md) |
+
+
 ## 📚 참고 자료
 
 - [KAIST Pintos 공식 매뉴얼](https://casys-kaist.github.io/pintos-kaist/)
@@ -71,4 +81,4 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 
 ---
 
-**Pintos Project 1 · Threads**
+**Pintos Project 2 · User Program**
