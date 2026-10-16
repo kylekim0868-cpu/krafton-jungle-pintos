@@ -11,18 +11,18 @@
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
-/* System call.
+/* 시스템 콜.
  *
- * Previously system call services was handled by the interrupt handler
- * (e.g. int 0x80 in linux). However, in x86-64, the manufacturer supplies
- * efficient path for requesting the system call, the `syscall` instruction.
+ * 예전에는 시스템 콜 서비스를 인터럽트 핸들러가 처리했다
+ * (예: 리눅스의 int 0x80). 하지만 x86-64에서는 제조사가 시스템 콜을
+ * 요청하는 더 효율적인 경로인 `syscall` 명령어를 제공한다.
  *
- * The syscall instruction works by reading the values from the the Model
- * Specific Register (MSR). For the details, see the manual. */
+ * syscall 명령어는 MSR(Model Specific Register, 모델별 레지스터)의
+ * 값을 읽어서 동작한다. 자세한 내용은 매뉴얼을 참고할 것. */
 
-#define MSR_STAR 0xc0000081         /* Segment selector msr */
-#define MSR_LSTAR 0xc0000082        /* Long mode SYSCALL target */
-#define MSR_SYSCALL_MASK 0xc0000084 /* Mask for the eflags */
+#define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
+#define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
+#define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
 void
 syscall_init (void) {
@@ -30,17 +30,17 @@ syscall_init (void) {
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
 
-	/* The interrupt service rountine should not serve any interrupts
-	 * until the syscall_entry swaps the userland stack to the kernel
-	 * mode stack. Therefore, we masked the FLAG_FL. */
+	/* syscall_entry가 유저 영역 스택을 커널 모드 스택으로 바꾸기 전까지는
+	 * 인터럽트 서비스 루틴이 어떤 인터럽트도 처리하면 안 된다.
+	 * 따라서 FLAG_FL을 마스킹했다. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
-/* The main system call interface */
+/* 시스템 콜의 메인 인터페이스 */
 void
 syscall_handler (struct intr_frame *f UNUSED) {
-	// TODO: Your implementation goes here.
+	// TODO: 여기에 구현을 작성할 것.
 	printf ("system call!\n");
 	thread_exit ();
 }

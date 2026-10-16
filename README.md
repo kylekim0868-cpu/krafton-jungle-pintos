@@ -30,6 +30,13 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 
 📖 [Pintos Docker 개발 환경 가이드](https://github.com/krafton-jungle/pintos_22.04_lab_docker)
 
+## 🚧 진행 상황
+
+- **Project 1 (Threads)**: 구현 완료 후 `main`에 병합됨
+- **Project 2 (User Programs)**: 진행 중 (`Project2userprog` 브랜치)
+  - `userprog/` 소스(`process.c`, `syscall.c`, `exception.c`, `gdt.c`, `tss.c`)의 영어 주석을 한국어로 번역함 (코드 변경 없음)
+  - 다음 작업: 인자 전달(argument passing) → 시스템 콜 → `process_wait`/`process_exit`
+
 ## 🤝 협업 방식
 
 - 설계 방향과 공통 자료구조를 논의한 후 구현을 분담합니다.
