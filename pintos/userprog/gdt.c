@@ -6,20 +6,18 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 
-/* The Global Descriptor Table (GDT).
+/* GDT (Global Descriptor Table, 전역 디스크립터 테이블).
  *
- * The GDT, an x86-64 specific structure, defines segments that can
- * potentially be used by all processes in a system, subject to
- * their permissions.  There is also a per-process Local
- * Descriptor Table (LDT) but that is not used by modern
- * operating systems.
+ * GDT는 x86-64 전용 구조체로, 시스템의 모든 프로세스가 (권한에 따라)
+ * 사용할 수 있는 세그먼트들을 정의한다. 프로세스마다 따로 두는
+ * LDT(Local Descriptor Table)도 있지만, 최신 운영체제에서는
+ * 사용하지 않는다.
  *
- * Each entry in the GDT, which is known by its byte offset in
- * the table, identifies a segment.  For our purposes only three
- * types of segments are of interest: code, data, and TSS or
- * Task-State Segment descriptors.  The former two types are
- * exactly what they sound like.  The TSS is used primarily for
- * stack switching on interrupts. */
+ * GDT의 각 엔트리는 테이블 안의 바이트 오프셋으로 식별되며,
+ * 하나의 세그먼트를 나타낸다. 우리 목적에서는 세 종류의 세그먼트만
+ * 중요하다: 코드, 데이터, 그리고 TSS(Task-State Segment) 디스크립터.
+ * 앞의 둘은 이름 그대로의 역할을 한다. TSS는 주로 인터럽트 발생 시
+ * 스택을 전환하는 데 쓰인다. */
 
 struct segment_desc {
 	unsigned lim_15_0 : 16;
@@ -77,11 +75,11 @@ struct desc_ptr gdt_ds = {
 	.address = (uint64_t) gdt
 };
 
-/* Sets up a proper GDT.  The bootstrap loader's GDT didn't
-   include user-mode selectors or a TSS, but we need both now. */
+/* 올바른 GDT를 설정한다. 부트스트랩 로더의 GDT에는 유저 모드용
+   셀렉터와 TSS가 없었는데, 이제는 둘 다 필요하다. */
 void
 gdt_init (void) {
-	/* Initialize GDT. */
+	/* GDT를 초기화한다. */
 	struct segment_descriptor64 *tss_desc =
 		(struct segment_descriptor64 *) &gdt[SEL_TSS >> 3];
 	struct task_state *tss = tss_get ();
@@ -106,7 +104,7 @@ gdt_init (void) {
 	};
 
 	lgdt (&gdt_ds);
-	/* reload segment registers */
+	/* 세그먼트 레지스터를 다시 로드한다 */
 	asm volatile("movw %%ax, %%gs" :: "a" (SEL_UDSEG));
 	asm volatile("movw %%ax, %%fs" :: "a" (0));
 	asm volatile("movw %%ax, %%es" :: "a" (SEL_KDSEG));
@@ -117,6 +115,6 @@ gdt_init (void) {
 			"pushq %%rax\n"
 			"lretq\n"
 			"1:\n" :: "b" (SEL_KCSEG):"cc","memory");
-	/* Kill the local descriptor table */
+	/* LDT(Local Descriptor Table)를 없앤다 */
 	lldt (0);
 }
