@@ -336,6 +336,27 @@ load (const char *file_name, struct intr_frame *if_) {
 	if (t->pml4 == NULL)
 		goto done;
 	process_activate (thread_current ());
+	
+	/* 여기에서 파싱을 마쳐야함 */
+	/* strtok_r은 문자열을 구분자로 나뉜 토큰들로 조갬.
+	   처음 호출할 때 S는 토큰으로 나눈 문자열이여야함, 이후 호출에서는 NULL 포인터여야함.
+	   SAVE_PTR은 이전 토큰을 추적할 수 있음.
+	*/
+	
+	char * cp_file_name = file_name; /* 원본 말고 복사본 */
+	char *token, *save_ptr; /* token : 단어, save_ptr : 이전 토큰으로 쪼갠 문자열 위치 */
+	int argc = 0; /* 인자 개수 */
+	char *split_tokens[64]; /* 토큰의 포인터를 담을 배열 */
+	int total_str = 0; /* 문자열 총 공간 크기 */
+
+	/* 반복문에서 토큰 추출 */
+	for(token = strtok_r(cp_file_name, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)){
+		split_tokens[argc] = token;
+		argc++;
+		total_str += strlen(token)+1;
+	}
+	file_name = split_tokens[0];
+	char *temp_argv[65]; /* 포인터 담아둘 임시 배열 */
 
 	/* 실행 파일을 연다. */
 	file = filesys_open (file_name);
@@ -409,7 +430,7 @@ load (const char *file_name, struct intr_frame *if_) {
 		}
 	}
 
-	/* 스택을 설정한다. */
+	/* 스택을 설정한다. */ 
 	if (!setup_stack (if_))
 		goto done;
 
@@ -419,6 +440,44 @@ load (const char *file_name, struct intr_frame *if_) {
 	/* TODO: 여기에 코드를 작성할 것.
 	 * TODO: 인자 전달(argument passing)을 구현할 것
 	 * TODO: (project2/argument_passing.html 참고). */
+	 
+	/* RSP에 인자 + NULL 거꾸로 담기 */
+	for(i=argc-1; i>=0; i--){
+		int token_len = strlen(split_tokens[i])+1;
+		/* rsp에서 단어 길이만큼 빼줌 */
+		if_->rsp = if_->rsp - sizeof(char) * token_len; /* 시작 주소 */
+		/* rsp메모리 위치에 토큰으로 나눈 단어 복사해서 넣기 */
+		memcpy((void*)if_->rsp, split_tokens[i], token_len);
+		temp_argv[i] = if_->rsp;
+		/* split_tokens의 i 인덱스에 해당하는 원소의 바이트 수 계산 후 rsp 주소 이동 
+			스택은 주소가 아래로 향하기 때문에 rsp 시작 주소에서 - offset(split_tokens 각 원소 바이트)	 
+			ex) split_tokens[1] = "bar\0" 
+			-> if_->rsp - 4 
+		*/
+		/* 비트연산으로 0으로 변경하면 안에 공간이 0으로 바뀜 */
+		if(i==0) if_->rsp = if_->rsp & ~0x7;
+	}
+
+	/* 반복 조건 : argc+1만큼 반복 단 거꾸로 넣어야함으로 i--로 거꾸로 반복 */
+	for(i = argc; i >= 0; i--){ 
+		if_->rsp = if_->rsp - sizeof(char *); /* 주소를 넣을 공간 확보 */
+		/* 3. 배열이 끝내는 부분을 알기 위해 0을 추가한다 */
+		if(i == argc) 
+			if_->rsp = NULL;
+		/* 만약 i와 argc가 다르면 rsp 내려가면서 argv[i] 추가함 */			
+		else
+			if_->rsp = temp_argv[i];
+	}
+ 
+	
+	
+	/* 최종 레지스터 셋업 */
+	if_->R.rdi = argc;	/**/
+	if_->R.rsi = if_->rsp;
+
+	/* 가짜 주소 설정 */
+	if_->rsp -= sizeof(void *); /* 스택에서 반환 주소 공간 확보 -> 스택 포인터를 8바이트 내린다 */
+	if_->rsp = 0; /* 스택 포인터 자체를 0으로 변경한다 */
 
 	success = true;
 
