@@ -343,10 +343,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	   SAVE_PTR은 이전 토큰을 추적할 수 있음.
 	*/
 	
-	char * cp_file_name = file_name; /* 원본 말고 복사본 */
-	char *token, *save_ptr; /* token : 단어, save_ptr : 이전 토큰으로 쪼갠 문자열 위치 */
+	char* cp_file_name = file_name; /* 원본 말고 복사본 */
+	char* token, * save_ptr; /* token : 단어, save_ptr : 이전 토큰으로 쪼갠 문자열 위치 */
 	int argc = 0; /* 인자 개수 */
-	char *split_tokens[64]; /* 토큰의 포인터를 담을 배열 */
+	char* split_tokens[64]; /* 토큰의 포인터를 담을 배열 */
 	int total_str = 0; /* 문자열 총 공간 크기 */
 
 	/* 반복문에서 토큰 추출 */
@@ -355,8 +355,10 @@ load (const char *file_name, struct intr_frame *if_) {
 		argc++;
 		total_str += strlen(token)+1;
 	}
-	file_name = split_tokens[0];
-	char *temp_argv[65]; /* 포인터 담아둘 임시 배열 */
+	/* argc가 0이 아닐때만 파일이름이 0이다 */
+	if(argc != 0) file_name = split_tokens[0];
+	
+	char* temp_argv[65]; /* 포인터 담아둘 임시 배열 */
 
 	/* 실행 파일을 연다. */
 	file = filesys_open (file_name);
@@ -445,10 +447,10 @@ load (const char *file_name, struct intr_frame *if_) {
 	for(i=argc-1; i>=0; i--){
 		int token_len = strlen(split_tokens[i])+1;
 		/* rsp에서 단어 길이만큼 빼줌 */
-		if_->rsp = if_->rsp - sizeof(char) * token_len; /* 시작 주소 */
+		if_->rsp = if_->rsp - (sizeof(char) * token_len); /* 시작 주소 */
 		/* rsp메모리 위치에 토큰으로 나눈 단어 복사해서 넣기 */
 		memcpy((void*)if_->rsp, split_tokens[i], token_len);
-		temp_argv[i] = if_->rsp;
+		temp_argv[i] = (char *)if_->rsp;
 		/* split_tokens의 i 인덱스에 해당하는 원소의 바이트 수 계산 후 rsp 주소 이동 
 			스택은 주소가 아래로 향하기 때문에 rsp 시작 주소에서 - offset(split_tokens 각 원소 바이트)	 
 			ex) split_tokens[1] = "bar\0" 
@@ -463,21 +465,19 @@ load (const char *file_name, struct intr_frame *if_) {
 		if_->rsp = if_->rsp - sizeof(char *); /* 주소를 넣을 공간 확보 */
 		/* 3. 배열이 끝내는 부분을 알기 위해 0을 추가한다 */
 		if(i == argc) 
-			if_->rsp = NULL;
+			*(char**)if_->rsp = 0;
 		/* 만약 i와 argc가 다르면 rsp 내려가면서 argv[i] 추가함 */			
 		else
-			if_->rsp = temp_argv[i];
+			*(char**)if_->rsp = temp_argv[i];
 	}
- 
-	
 	
 	/* 최종 레지스터 셋업 */
-	if_->R.rdi = argc;	/**/
+	if_->R.rdi = argc;
 	if_->R.rsi = if_->rsp;
 
 	/* 가짜 주소 설정 */
 	if_->rsp -= sizeof(void *); /* 스택에서 반환 주소 공간 확보 -> 스택 포인터를 8바이트 내린다 */
-	if_->rsp = 0; /* 스택 포인터 자체를 0으로 변경한다 */
+	*(char **)if_->rsp = 0; /* 스택 포인터 자체를 0으로 변경한다 */
 
 	success = true;
 
