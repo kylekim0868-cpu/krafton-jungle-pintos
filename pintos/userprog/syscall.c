@@ -15,6 +15,8 @@ struct lock filesys_lock;
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+int read (int fd, void *buffer, unsigned size);
+
 /* 시스템 콜.
  *
  * 예전에는 시스템 콜 서비스를 인터럽트 핸들러가 처리했다
@@ -27,6 +29,46 @@ void syscall_handler (struct intr_frame *);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
+
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
+bool
+check_buffer(void *buffer, unsigned size)
+{
+	if (buffer == NULL) return false;
+	if (size == 0) return true;
+	/* uint8_t로 한 이유는 비트가 8비트가 1byte인데 이렇게
+	   해야 size를 더했을때 정확한 end주소가 나옴 */
+	uint8_t *start = buffer;
+	uint8_t *end = start + size - 1;
+	/* 하나라도 유저영역이 아니면 false */
+	if (!is_user_vaddr(start) || !is_user_vaddr(end))
+		return false;
+
+	/* 버퍼가 걸친 모든 페이지가 매핑돼 있는지 */
+	for (uint8_t *p = pg_round_down(start); p <= end; p += PGSIZE)
+		/* 페이지에 매핑된게 있는지 검사 */
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false;
+	/* 전부 통과시 true */
+	return true;
+}
+
+int
+read (int fd, void *buffer, unsigned size){
+	if(!check_buffer(buffer, size)) return -1;
+	/* 키보드에서 읽어옴 */
+	if(fd==0){
+		uint8_t *buf = buffer;
+		for(unsigned i=0; i<=size; i++){
+			buf[i] = input_getc();
+		}
+		return size;
+	}else if(fd==1) return -1;
+	else{
+		
+	}
+}
+
 
 void
 syscall_init (void) {
@@ -70,7 +112,7 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_OPEN:
 			break;
 		case SYS_FILESIZE:
-			break;		
+			break;
 		case SYS_READ:
 			break;
 		case SYS_WRITE:
