@@ -9,6 +9,8 @@
 #include "intrinsic.h"
 #include "filesys/filesys.h" /* 파일 생성·삭제 등 파일 시스템 함수의 선언을 가져온다. */
 #include "threads/synch.h"
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
 #include "threads/mmu.h" /* 페이지 매핑 확인 */
 #include "threads/vaddr.h" /* 유저 주소 영역 확인 */
 #include "filesys/file.h"
@@ -187,26 +189,40 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_WAIT: 
 			break;
-		case SYS_CREATE: {
+		case SYS_REMOVE: {
 
 			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
-
+			
 			if (!valid_user_string(file)) {
 				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
 				f->R.rax = false;
 				return;
-			}
+			 }
 			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
 
-			bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
+			bool result = filesys_remove(file); /* 파일 이름으로 삭제를 시도하고, 성공 여부를 result에 저장한다. */
+			
+			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제한다. */
 
-			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
+			f->R.rax = result; /* 삭제 성공 여부를 반환값 레지스터 rax에 저장한다. */
+    }
+		case SYS_CREATE: {
+      const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
 
-			f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
-			break;
-		}
-		case SYS_REMOVE:
-			break;
+      if (!valid_user_string(file)) {
+        /* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
+        f->R.rax = false;
+        return;
+      }
+      lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
+
+      bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
+
+      lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
+
+      f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
+      break;
+    }
 		case SYS_OPEN:
 			f->R.rax = syscall_open((char* )f->R.rdi);
 			break;
