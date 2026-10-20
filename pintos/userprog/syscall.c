@@ -7,11 +7,10 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "filesys/filesys.h" /* 파일 생성·삭제 등 파일 시스템 함수의 선언을 가져온다. */
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
-/* 파일을 생성하는 함수 선언 부분 */
-bool syscall_create(const char *file, unsigned initial_size)
 
 /* 시스템 콜.
  *
@@ -60,18 +59,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_WAIT: 
 			break;
 		case SYS_CREATE:
-		/* 1. 첫 번째 인자 : 파일 이름 주소 */
-		const char *file = (const char *) f->R.rdi;
-
-		/* 2. 두 번째 인자 : 파일 초기 크기 */
-		unsigned initial_size = (unsigned) f->R.rsi;
-
-		/* 3. 파일 생성 시도 */
-		bool result = create(file, initial_size);
-
-		/* 4. 성공 또는 실패 결과 반환 */
-		f->R.rax = result;
-
+		f->R.rax = filesys_create((const char *) f->R.rdi, (unsigned) f->R.rsi);
 			break;
 		case SYS_REMOVE:
 			break;
