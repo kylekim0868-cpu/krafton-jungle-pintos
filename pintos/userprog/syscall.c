@@ -7,10 +7,13 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "filesys/file.h"
+#include "lib/kernel/stdio.h"
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+int syscall_write(int fd, void *buffer, unsigned size);
 /* 시스템 콜.
  *
  * 예전에는 시스템 콜 서비스를 인터럽트 핸들러가 처리했다
@@ -23,6 +26,57 @@ void syscall_handler (struct intr_frame *);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
+
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
+bool
+check_buffer(void *buffer, unsigned size)
+{
+	if (buffer == NULL) return false;
+	if (size == 0) return true;
+	/* uint8_t로 한 이유는 비트가 8비트가 1byte인데 이렇게
+	   해야 size를 더했을때 정확한 end주소가 나옴 */
+	uint8_t *start = buffer;
+	uint8_t *end = start + size - 1;
+	/* 하나라도 유저영역이 아니면 false */
+	if (!is_user_vaddr(start) || !is_user_vaddr(end))
+		return false;
+
+	/* 버퍼가 걸친 모든 페이지가 매핑돼 있는지 */
+	for (uint8_t *p = pg_round_down(start); p <= end; p += PGSIZE)
+		/* 페이지에 매핑된게 있는지 검사 */
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false;
+	/* 전부 통과시 true */
+	return true;
+}
+
+int 
+syscall_write (int fd, void *buffer, unsigned size)
+{	
+	/* 유저 영역인지, 매핑되어있는지 확인 */
+	if (!check_buffer(buffer, size)) return -1;
+	/* fd=0 : 잘못된 접근(키보드) false 반환 */
+	if(fd==0)
+	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
+	if(fd==1){
+		putbuf(buffer, size);
+		return size;
+	}
+	/* fd>=2 : 표에서 파일 꺼냄 */
+	else if(fd>=2){
+		struct file_descriptor* file = NULL;
+		int index=0;
+		/* [TODO] : file_table 순회하는 로직 필요 */
+		for(file=list_begin(file_discriptor); file!=NULL; file=list_next(file)){
+			if(fd == index) break;
+			index++;
+		}
+		if(file == NULL) return -1;
+		file = list_entry(file, struct file_descriptorm, fd_elem);
+		off_t write_byte = file_write(file, buffer, size);
+		return (int)write_byte;
+	}
+}
 
 void
 syscall_init (void) {
@@ -39,7 +93,7 @@ syscall_init (void) {
 
 /* 시스템 콜의 메인 인터페이스 */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
+syscall_handler (struct intr_frame *f) {
 	// TODO: 여기에 구현을 작성할 것.
 	/* 
 		Syscall Dispatcher
@@ -65,9 +119,11 @@ syscall_handler (struct intr_frame *f UNUSED) {
 			break;
 		case SYS_FILESIZE:
 			break;		
+		/* 내 파트 */
 		case SYS_READ:
 			break;
 		case SYS_WRITE:
+		/* 내 파트 */
 			break;
 		case SYS_SEEK:
 			break;
