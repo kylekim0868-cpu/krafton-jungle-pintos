@@ -29,7 +29,7 @@ int syscall_open(char *file);
 int syscall_filesize(int fd);
 int syscall_write(int fd, void *buffer, unsigned size);
 int syscall_read (int fd, void *buffer, unsigned size);
-
+void syscall_exit(int status);
 
 
 /* 시스템 콜.
@@ -45,8 +45,15 @@ int syscall_read (int fd, void *buffer, unsigned size);
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
-/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
 
+void 
+syscall_exit(int status){
+	/* 스레드의 exit_status 필드에 return으로 나온 값 담음 */
+	thread_current()->exit_status = status;
+	thread_exit(); /* process_exit 호출 → 메시지 출력 후 소멸 */
+}
+
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
 static bool
 check_buffer(void *buffer, unsigned size)
 {
@@ -74,7 +81,7 @@ int
 syscall_write (int fd, void *buffer, unsigned size)
 {	
 	/* 유저 영역인지, 매핑되어있는지 확인 - syscall_exit() 호출로 프로세스 종료 */
-	if (!check_buffer(buffer, size)) return -1; /* syscall_exit() 호출해야함 */
+	if (!check_buffer(buffer, size)) syscall_exit(-1);
 	/* fd=0 : 잘못된 접근(키보드) -1 반환 */
 	if(fd<=0 || fd>=fd_list_size) return -1;
 	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
@@ -98,7 +105,7 @@ syscall_write (int fd, void *buffer, unsigned size)
 
 int
 syscall_read (int fd, void *buffer, unsigned size){
-	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
+	if(!check_buffer(buffer, size)) syscall_exit(-1);
 	/* 키보드에서 읽어옴 */
 	if(fd==0){
 		uint8_t *buf = buffer;
@@ -175,7 +182,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_HALT: 
 			break;
 		case SYS_EXIT: 
-			break;
+			syscall_exit(f->R.rdi);
 		case SYS_FORK: 
 			break;
 		case SYS_EXEC: 
@@ -238,8 +245,7 @@ syscall_handler (struct intr_frame *f) {
 		default:
 			break;
 	}	
-	
-	printf ("system call!\n");
+	// printf ("system call!\n");
 }
 
 /* 
@@ -260,8 +266,7 @@ int syscall_open(char* file_name)
 
 	/* ✔︎ 사용자 가상 주소 범위인지 file_name이 비어있지 않은지 페이지에 해당되는지 확인 */
 	if(!is_user_vaddr(file_name) || file_name == NULL || !(pml4_get_page(t->pml4, file_name))){
-		thread_exit(); /* SYS_EXIT 함수가 구현되면 이 위치에 들어감 */
-		return -1;
+		syscall_exit(-1);
 	}
 
 	/* fd테이블이 비었다면 페이지 전체를 NULL로 초기화 */
@@ -277,7 +282,7 @@ int syscall_open(char* file_name)
 			→ 침범했다면 thread_exit();
 		*/
 		if(!(is_user_vaddr(file_name+i)) || !(pml4_get_page(t->pml4, file_name+i))){
-			thread_exit();
+			syscall_exit(-1);
 		}
 		/* 문자열의 끝 문자를 만났다면 break */
 		if(file_name[i] == '\0'){
@@ -314,7 +319,7 @@ int syscall_filesize(int fd){
 	struct thread *t = thread_current();
 	/* fd에 해당하는 file객체가 없다면 프로세스 종료? */
 	if(!(t->fd_list[fd])){
-		thread_exit();
+		syscall_exit(-1);
 	}
 	return file_length(t->fd_list[fd]);
 
