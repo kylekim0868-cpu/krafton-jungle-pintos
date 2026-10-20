@@ -9,6 +9,8 @@
 #include "intrinsic.h"
 #include "filesys/filesys.h" /* 파일 생성·삭제 등 파일 시스템 함수의 선언을 가져온다. */
 #include "threads/synch.h"
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -44,6 +46,28 @@ syscall_init (void) {
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
 }
 
+/* Project 2 : 파일 이름을 종료 문자까지 안전하게 읽을 수 있는지 검사한다. */
+static bool
+valid_user_string(const char *str) {
+	if (str == NULL)
+		return false; /* 문자열 주소가 NULL이면 실패합니다. */
+
+	const char *p = str; /* 첫 번째 문자부터 검사하기 위해 현재 위치를 p에 저장합니다. */
+
+	for (;;) {
+		if (!is_user_vaddr(p))
+			return false; /* 현재 주소가 유저 영역 밖이면 실패합니다. 커널 메모리를 파일 이름으로 읽지 못하게 합니다. */
+
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false; /* 유저 영역이더라도 실제 메모리가 매핑되지 않은 주소라면 실패합니다. */
+
+		if (*p == '\0')
+			return true; /* 앞의 주소 검사를 통과한 뒤 문자를 읽습니다. 문자열 끝이면 검사 성공입니다. */
+
+		p++; /* 다음 문자로 이동해서 반복합니다. 따라서 문자열이 페이지 경계를 넘어가도 다음 주소를 검사합니다. */
+	}
+}
+
 /* 시스템 콜의 메인 인터페이스 */
 void
 syscall_handler (struct intr_frame *f) {
@@ -65,10 +89,25 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_WAIT: 
 			break;
 		case SYS_CREATE:
-		f->R.rax = filesys_create((const char *) f->R.rdi, (unsigned) f->R.rsi);
 			break;
-		case SYS_REMOVE:
+		case SYS_REMOVE: {
+
+			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
+			
+			if (!valid_user_string(file)) {
+				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
+				f->R.rax = false;
+				return;
+			}
+			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
+
+			bool result = filesys_remove(file); /* 파일 이름으로 삭제를 시도하고, 성공 여부를 result에 저장한다. */
+			
+			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제한다. */
+
+			f->R.rax = result; /* 삭제 성공 여부를 반환값 레지스터 rax에 저장한다. */
 			break;
+		}
 		case SYS_OPEN:
 			break;
 		case SYS_FILESIZE:
