@@ -13,16 +13,21 @@
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
+#include "devices/input.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
 
+/* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
+const int fd_list_size = PGSIZE/8; 
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
 int syscall_open(char *file);
 int syscall_filesize(int fd);
 
-int read (int fd, void *buffer, unsigned size);
+int syscall_read (int fd, void *buffer, unsigned size);
 
 /* 시스템 콜.
  *
@@ -38,7 +43,7 @@ int read (int fd, void *buffer, unsigned size);
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
 /* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
-bool
+static bool
 check_buffer(void *buffer, unsigned size)
 {
 	if (buffer == NULL) return false;
@@ -61,18 +66,29 @@ check_buffer(void *buffer, unsigned size)
 }
 
 int
-read (int fd, void *buffer, unsigned size){
-	if(!check_buffer(buffer, size)) return -1;
+syscall_read (int fd, void *buffer, unsigned size){
+	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
 	/* 키보드에서 읽어옴 */
 	if(fd==0){
 		uint8_t *buf = buffer;
-		for(unsigned i=0; i<=size; i++){
+		/* 반복문 돌면서 하나씩 받아옴 size만큼 반복 */
+		for(unsigned i=0; i<size; i++){
 			buf[i] = input_getc();
 		}
 		return size;
-	}else if(fd==1) return -1;
+	}
+	/* fd=1 : 화면을 의미함으로 맞지 않은 fd임 */
+	else if(fd==1 || fd < 0 || fd>=fd_list_size) 
+		return -1;
+	/* 파일에 접근해서 size만큼 읽어옴 */
 	else{
-		
+		if(!thread_current()->fd_list[fd]) return -1;
+		else{
+			lock_acquire(&filesys_lock);
+			int byte_size = file_read(thread_current()->fd_list[fd], buffer, size);
+			lock_release(&filesys_lock);
+			return byte_size;
+		}
 	}
 }
 
@@ -123,6 +139,7 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = syscall_filesize(f->R.rdi);
 			break;		
 		case SYS_READ:
+			f->R.rax = syscall_read(f->R.rdi, (void *)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
 			break;
@@ -180,8 +197,6 @@ int syscall_open(char* file_name)
 		}
 		i++;
 	}
-
-	int fd_list_size = PGSIZE/8; /* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
 
 	/* 
 		fd=0,1을 제외하고 2부터 file객체를 push.
