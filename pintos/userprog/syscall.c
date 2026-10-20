@@ -7,6 +7,8 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "filesys/file.h"
+#include "lib/kernel/stdio.h"
 #include "threads/synch.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
@@ -26,8 +28,10 @@ void syscall_handler (struct intr_frame *);
 
 int syscall_open(char *file);
 int syscall_filesize(int fd);
-
+int syscall_write(int fd, void *buffer, unsigned size);
 int syscall_read (int fd, void *buffer, unsigned size);
+
+
 
 /* 시스템 콜.
  *
@@ -43,6 +47,7 @@ int syscall_read (int fd, void *buffer, unsigned size);
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
 /* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
+
 static bool
 check_buffer(void *buffer, unsigned size)
 {
@@ -65,6 +70,33 @@ check_buffer(void *buffer, unsigned size)
 	return true;
 }
 
+
+int 
+syscall_write (int fd, void *buffer, unsigned size)
+{	
+	/* 유저 영역인지, 매핑되어있는지 확인 - syscall_exit() 호출로 프로세스 종료 */
+	if (!check_buffer(buffer, size)) return -1; /* syscall_exit() 호출해야함 */
+	/* fd=0 : 잘못된 접근(키보드) false 반환 */
+	if(fd<=0 || fd>=fd_list_size) return -1;
+	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
+	if(fd==1){
+		putbuf(buffer, size);
+		return size;
+	}
+	/* fd>=2 : 표에서 파일 꺼냄 */
+	else if(fd>=2){
+		if(!thread_current()->fd_list[fd])
+			return -1;
+		else{
+			/* lock 처리 */
+			lock_acquire(&filesys_lock);
+			int write_byte = file_write(thread_current()->fd_list[fd], buffer, size);
+			lock_release(&filesys_lock);
+			return write_byte;
+		}
+	}
+}
+
 int
 syscall_read (int fd, void *buffer, unsigned size){
 	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
@@ -84,6 +116,7 @@ syscall_read (int fd, void *buffer, unsigned size){
 	else{
 		if(!thread_current()->fd_list[fd]) return -1;
 		else{
+			/* lock 처리 */
 			lock_acquire(&filesys_lock);
 			int byte_size = file_read(thread_current()->fd_list[fd], buffer, size);
 			lock_release(&filesys_lock);
@@ -142,6 +175,8 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = syscall_read(f->R.rdi, (void *)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
+			/* buffer는 포인터라서 uint64_t인 rsi가 들어가면 문제가 됨 캐스팅 해야함 */
+			f->R.rax = syscall_write(f->R.rdi, (void*)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_SEEK:
 			break;
