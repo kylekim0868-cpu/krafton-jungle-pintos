@@ -77,7 +77,9 @@ syscall_write (int fd, void *buffer, unsigned size)
 		if(cur_file == NULL) return -1;
 		struct file_descriptor* fd_file = list_entry(cur_file, struct file_descriptor, fd_elem);
 		if(fd_file->file == NULL) return -1;
+		lock_acquire(&filesys_lock);
 		off_t write_byte = file_write(fd_file->file, buffer, size);
+		lock_release(&filesys_lock);
 		return (int)write_byte;
 	}
 }
