@@ -56,7 +56,7 @@ syscall_write (int fd, void *buffer, unsigned size)
 	/* 유저 영역인지, 매핑되어있는지 확인 */
 	if (!check_buffer(buffer, size)) return -1;
 	/* fd=0 : 잘못된 접근(키보드) false 반환 */
-	if(fd==0)
+	if(fd==0) return -1;
 	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
 	if(fd==1){
 		putbuf(buffer, size);
@@ -64,16 +64,18 @@ syscall_write (int fd, void *buffer, unsigned size)
 	}
 	/* fd>=2 : 표에서 파일 꺼냄 */
 	else if(fd>=2){
-		struct file_descriptor* file = NULL;
+		struct list_elem* cur_file = NULL;
 		int index=0;
 		/* [TODO] : file_table 순회하는 로직 필요 */
-		for(file=list_begin(file_discriptor); file!=NULL; file=list_next(file)){
+		for(cur_file=list_begin(thread_current()->fd_list); cur_file!=NULL; cur_file=list_next(cur_file)){
 			if(fd == index) break;
 			index++;
 		}
-		if(file == NULL) return -1;
-		file = list_entry(file, struct file_descriptorm, fd_elem);
-		off_t write_byte = file_write(file, buffer, size);
+		/* 순회 이후 cur_file이 NULL이면 리스트에 아무것도 채워지지 않았다는 뜻 */
+		if(cur_file == NULL) return -1;
+		struct file_descriptor* fd_file = list_entry(cur_file, struct file_descriptors, fd_elem);
+		if(fd_file->file == NULL) return -1;
+		off_t write_byte = file_write(fd_file->file, buffer, size);
 		return (int)write_byte;
 	}
 }
@@ -123,6 +125,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_READ:
 			break;
 		case SYS_WRITE:
+			f->R.rax = syscall_write(f->R.rdi, f->R.rsi, f->R.rdx);
 		/* 내 파트 */
 			break;
 		case SYS_SEEK:
