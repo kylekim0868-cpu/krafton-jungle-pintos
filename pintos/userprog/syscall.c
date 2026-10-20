@@ -25,12 +25,14 @@ const int fd_list_size = PGSIZE/8;
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
+bool syscall_create(const char *file, unsigned initial_size);
+bool syscall_remove(const char *file);
 int syscall_open(char *file);
 int syscall_filesize(int fd);
 int syscall_write(int fd, void *buffer, unsigned size);
 int syscall_read (int fd, void *buffer, unsigned size);
 void syscall_exit(int status);
-
+void syscall_seek(int fd, unsigned position);
 
 /* 시스템 콜.
  *
@@ -44,7 +46,6 @@ void syscall_exit(int status);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
-
 
 void 
 syscall_exit(int status){
@@ -169,6 +170,51 @@ valid_user_string(const char *str) {
 	}
 }
 
+bool
+syscall_create(const char *file, unsigned initial_size) {
+    if (!valid_user_string(file)) {
+        syscall_exit(-1);
+        return false; /* 종료 함수가 반환하지 않으면 도달하지 않음 */
+    }
+
+    lock_acquire(&filesys_lock);
+    bool result = filesys_create(file, initial_size);
+    lock_release(&filesys_lock);
+
+    return result;
+}
+
+bool
+syscall_remove(const char *file) {
+    if (!valid_user_string(file)) {
+        syscall_exit(-1);
+        return false;
+    }
+
+    lock_acquire(&filesys_lock);
+    bool result = filesys_remove(file);
+    lock_release(&filesys_lock);
+
+    return result;
+}
+
+void
+syscall_seek(int fd, unsigned position) {
+    struct thread *t = thread_current();
+
+    /* 표준 입출력과 배열 범위 밖의 fd는 처리하지 않는다. */
+    if (fd < 2 || fd >= fd_list_size)
+        return;
+
+    /* 파일 테이블이 없거나 해당 fd가 열려 있지 않으면 반환한다. */
+    if (t->fd_list == NULL || t->fd_list[fd] == NULL)
+        return;
+
+    lock_acquire(&filesys_lock);
+    file_seek(t->fd_list[fd], position);
+    lock_release(&filesys_lock);
+}
+
 /* 시스템 콜의 메인 인터페이스 */
 void
 syscall_handler (struct intr_frame *f) {
@@ -189,40 +235,12 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_WAIT: 
 			break;
-		case SYS_REMOVE: {
-
-			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
-			
-			if (!valid_user_string(file)) {
-				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
-				f->R.rax = false;
-				return;
-			 }
-			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
-
-			bool result = filesys_remove(file); /* 파일 이름으로 삭제를 시도하고, 성공 여부를 result에 저장한다. */
-			
-			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제한다. */
-
-			f->R.rax = result; /* 삭제 성공 여부를 반환값 레지스터 rax에 저장한다. */
-    	}
-		case SYS_CREATE: {
-			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
-
-			if (!valid_user_string(file)) {
-				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
-				f->R.rax = false;
-				return;
-			}
-			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
-
-			bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
-
-			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
-
-			f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
+		case SYS_CREATE: 
+			f->R.rax = syscall_create((const char *) f->R.rdi, (unsigned) f->R.rsi);
 			break;
-		}
+		case SYS_REMOVE: 
+			f->R.rax = syscall_remove((const char *) f->R.rdi);
+			break;
 		case SYS_OPEN:
 			f->R.rax = syscall_open((char* )f->R.rdi);
 			break;
@@ -236,7 +254,8 @@ syscall_handler (struct intr_frame *f) {
 			/* buffer는 포인터라서 uint64_t인 rsi가 들어가면 문제가 됨 캐스팅 해야함 */
 			f->R.rax = syscall_write(f->R.rdi, (void*)f->R.rsi, f->R.rdx);
 			break;
-		case SYS_SEEK:
+		case SYS_SEEK: 
+			syscall_seek((int) f->R.rdi, (unsigned) f->R.rsi);
 			break;
 		case SYS_TELL:
 			break;
