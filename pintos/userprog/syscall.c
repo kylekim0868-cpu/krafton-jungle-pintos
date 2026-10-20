@@ -13,14 +13,21 @@
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
+#include "devices/input.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
 
+/* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
+const int fd_list_size = PGSIZE/8; 
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
 int syscall_open(char *file);
 int syscall_filesize(int fd);
+
+int syscall_read (int fd, void *buffer, unsigned size);
 
 /* 시스템 콜.
  *
@@ -34,6 +41,57 @@ int syscall_filesize(int fd);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
+
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
+static bool
+check_buffer(void *buffer, unsigned size)
+{
+	if (buffer == NULL) return false;
+	if (size == 0) return true;
+	/* uint8_t로 한 이유는 비트가 8비트가 1byte인데 이렇게
+	   해야 size를 더했을때 정확한 end주소가 나옴 */
+	uint8_t *start = buffer;
+	uint8_t *end = start + size - 1;
+	/* 하나라도 유저영역이 아니면 false */
+	if (!is_user_vaddr(start) || !is_user_vaddr(end))
+		return false;
+
+	/* 버퍼가 걸친 모든 페이지가 매핑돼 있는지 */
+	for (uint8_t *p = pg_round_down(start); p <= end; p += PGSIZE)
+		/* 페이지에 매핑된게 있는지 검사 */
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false;
+	/* 전부 통과시 true */
+	return true;
+}
+
+int
+syscall_read (int fd, void *buffer, unsigned size){
+	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
+	/* 키보드에서 읽어옴 */
+	if(fd==0){
+		uint8_t *buf = buffer;
+		/* 반복문 돌면서 하나씩 받아옴 size만큼 반복 */
+		for(unsigned i=0; i<size; i++){
+			buf[i] = input_getc();
+		}
+		return size;
+	}
+	/* fd=1 : 화면을 의미함으로 맞지 않은 fd임 */
+	else if(fd==1 || fd < 0 || fd>=fd_list_size) 
+		return -1;
+	/* 파일에 접근해서 size만큼 읽어옴 */
+	else{
+		if(!thread_current()->fd_list[fd]) return -1;
+		else{
+			lock_acquire(&filesys_lock);
+			int byte_size = file_read(thread_current()->fd_list[fd], buffer, size);
+			lock_release(&filesys_lock);
+			return byte_size;
+		}
+	}
+}
+
 
 void
 syscall_init (void) {
@@ -81,6 +139,7 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = syscall_filesize(f->R.rdi);
 			break;		
 		case SYS_READ:
+			f->R.rax = syscall_read(f->R.rdi, (void *)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
 			break;
@@ -138,8 +197,6 @@ int syscall_open(char* file_name)
 		}
 		i++;
 	}
-
-	int fd_list_size = PGSIZE/8; /* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
 
 	/* 
 		fd=0,1을 제외하고 2부터 file객체를 push.
