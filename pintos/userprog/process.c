@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 #include "intrinsic.h"
 #include "userprog/syscall.h"
+#include "devices/timer.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -209,6 +210,7 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: 힌트) process_wait(initd)가 리턴하면 pintos가 종료된다.
 	 * XXX:       process_wait를 구현하기 전까지는 여기에 무한 루프를
 	 * XXX:       넣어 두기를 권장한다. */
+	timer_sleep(100);
 	return -1;
 }
 
@@ -220,7 +222,7 @@ process_exit (void) {
 	 * TODO: 프로세스 종료 메시지를 구현할 것
 	 * TODO: (project2/process_termination.html 참고).
 	 * TODO: 프로세스 자원 정리도 여기서 구현하기를 권장한다. */
-
+	
 	process_cleanup ();
 }
 
