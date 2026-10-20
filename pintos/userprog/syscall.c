@@ -8,12 +8,19 @@
 #include "threads/flags.h"
 #include "intrinsic.h"
 #include "threads/synch.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
 
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+int syscall_open(char *file);
+int syscall_filesize(int fd);
 
 /* 시스템 콜.
  *
@@ -45,7 +52,7 @@ syscall_init (void) {
 
 /* 시스템 콜의 메인 인터페이스 */
 void
-syscall_handler (struct intr_frame *f UNUSED) {
+syscall_handler (struct intr_frame *f) {
 	// TODO: 여기에 구현을 작성할 것.
 	/* 
 		Syscall Dispatcher
@@ -68,8 +75,10 @@ syscall_handler (struct intr_frame *f UNUSED) {
 		case SYS_REMOVE:
 			break;
 		case SYS_OPEN:
+			f->R.rax = syscall_open((char* )f->R.rdi);
 			break;
 		case SYS_FILESIZE:
+			f->R.rax = syscall_filesize(f->R.rdi);
 			break;		
 		case SYS_READ:
 			break;
@@ -86,5 +95,82 @@ syscall_handler (struct intr_frame *f UNUSED) {
 	}	
 	
 	printf ("system call!\n");
-	thread_exit ();
+}
+
+/* 
+	fd_list 초기화 함수: 페이지를 할당받아 모든 페이지의 원소를 0으로 채워 초기화하는 동작
+*/
+void fd_list_init(struct thread* t){
+	/* 페이지의 0을 채워 공간 할당 */
+	t->fd_list = palloc_get_page(PAL_ZERO);
+	if(!(t->fd_list)){
+		thread_exit(); /* 프로세스 종료 */
+	}
+}
+
+int syscall_open(char* file_name)
+{
+	struct thread *t = thread_current();
+
+	/* ✔︎ 사용자 가상 주소 범위인지 확인 */
+	if(!is_user_vaddr(file_name) || file_name == NULL || !(pml4_get_page(t->pml4, file_name))){
+		thread_exit(); /* SYS_EXIT 함수가 구현되면 이 위치에 들어감 */
+	}
+
+	/* fd테이블이 비었다면 페이지 전체를 NULL로 초기화 */
+	if(!t->fd_list){
+		fd_list_init(t);
+	}
+
+	/* 문자열 시작 주소에서 끝 문자열까지만 접근했는지 판단 */
+	int i=0;
+	while(true){
+		/* 
+			✔︎ 문자열을 이동하며 각 문자열이 사용자 주소 공간인지, 페이지를 침범하지 않았는지 확인 
+			→ 침범했다면 thread_exit();
+		*/
+		if(!(is_user_vaddr(file_name+i)) || !(pml4_get_page(t->pml4, file_name+i))){
+			thread_exit();
+		}
+		/* 문자열의 끝 문자를 만났다면 break */
+		if(file_name[i] == '\0'){
+			break;
+		}
+		i++;
+	}
+
+	int fd_list_size = PGSIZE/8; /* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
+
+	/* 
+		fd=0,1을 제외하고 2부터 file객체를 push.
+		filesys_open함수를 통해 열린 파일 객체를 2번 idx에 저장. 단, 2번이 있다면 4번.. for문을 돌면서 확인
+	*/
+	for(int i=2; i<fd_list_size; i++){
+		/* NULL이면 현재 사용하지 않는 fd */
+		if(t->fd_list[i] == NULL){
+			/* 파일을 Open 후 반환된 파일 객체의 주소 저장(i번 FD 테이블에) */
+			t->fd_list[i] = filesys_open(file_name);
+			/* ✅ 성공: 열린 파일이 NULL X → 등록한 index(fd)반환 후 종료 */
+			if(t->fd_list[i] != NULL){
+				return i;
+			/* ❌ 실패: 열린 파일이 NULL → -1 반환*/
+			}else{
+				return -1;
+			}
+		}
+	}
+	/* FD테이블이 꽉 찼을 때 -1(실패) 반환 */
+	return -1;
+}
+
+/* fd로 열려 있는 파일의 크기를 바이트 단위로 반환한다. */
+int syscall_filesize(int fd){
+	/* 실행 중인 스레드 구조체 선언 */
+	struct thread *t = thread_current();
+	/* fd에 해당하는 file객체가 없다면 프로세스 종료? */
+	if(!(t->fd_list[fd])){
+		thread_exit();
+	}
+	return file_length(t->fd_list[fd]);
+
 }
