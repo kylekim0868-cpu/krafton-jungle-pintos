@@ -20,6 +20,7 @@
 #include "intrinsic.h"
 #include "userprog/syscall.h"
 #include "devices/timer.h"
+#include "threads/thread.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -222,7 +223,9 @@ process_exit (void) {
 	 * TODO: 프로세스 종료 메시지를 구현할 것
 	 * TODO: (project2/process_termination.html 참고).
 	 * TODO: 프로세스 자원 정리도 여기서 구현하기를 권장한다. */
-	
+
+	if (curr->pml4 != NULL)
+		printf("%s: exit(%d)\n", curr->name, curr->exit_status);
 	process_cleanup ();
 }
 
