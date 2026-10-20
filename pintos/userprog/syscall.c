@@ -21,6 +21,7 @@ void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 int syscall_open(char *file);
 int syscall_filesize(int fd);
+void syscall_close(int fd);
 
 /* 시스템 콜.
  *
@@ -89,6 +90,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_TELL:
 			break;
 		case SYS_CLOSE:
+			syscall_close(f->R.rdi);
 			break;
 		default:
 			break;
@@ -172,5 +174,13 @@ int syscall_filesize(int fd){
 		thread_exit();
 	}
 	return file_length(t->fd_list[fd]);
+
+}
+
+/* 프로세스가 정상적으로 종료되거나 강제 종료되면, 열려 있는 모든 파일 디스크립터가 자동으로 닫힌다 */
+void syscall_close(int fd){
+	/*	
+		Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one.
+	*/
 
 }
