@@ -15,6 +15,7 @@
 #include "lib/kernel/stdio.h"
 #include "threads/palloc.h"
 #include "devices/input.h"
+#include "threads/init.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -34,6 +35,7 @@ int syscall_read (int fd, void *buffer, unsigned size);
 void syscall_exit(int status);
 void syscall_seek(int fd, unsigned position);
 void syscall_close(int fd);
+void syscall_halt(void);
 
 /* 시스템 콜.
  *
@@ -226,7 +228,8 @@ syscall_handler (struct intr_frame *f) {
 	*/
 	switch (f->R.rax)
 	{
-		case SYS_HALT: 
+		case SYS_HALT:
+			syscall_halt();
 			break;
 		case SYS_EXIT: 
 			syscall_exit(f->R.rdi);
@@ -389,4 +392,9 @@ void syscall_close(int fd){
 
 	/* 공용 락 해제 */
 	lock_release(&filesys_lock);
+}
+
+/* power_off() 함수를 호출하여 Pintos 운영체제를 종료하는 함수 */
+void syscall_halt(void){
+	power_off();
 }
