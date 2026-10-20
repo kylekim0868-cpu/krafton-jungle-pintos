@@ -103,7 +103,7 @@ struct thread {
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
-// #ifdef USERPROG
+#ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
 #endif
@@ -158,4 +158,4 @@ void thread_clear_lock_wait(void);
 void thread_donate_on_wait(struct thread *donor, struct lock *lock);
 bool priority_higher(const struct list_elem *a, const struct list_elem *b, void *aux);
 
-// #endif /* threads/thread.h */
+#endif /* threads/thread.h */
