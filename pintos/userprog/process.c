@@ -53,8 +53,17 @@ process_create_initd (const char *file_name) {
 		return TID_ERROR;
 	strlcpy (fn_copy, file_name, PGSIZE);
 
+	/* 오류 발생 이유 : 현재 thread_create에 이름자리에 첫번째 token만 잘라서 들어가야하는데
+	   잘린게 들어가는게 아닌 16바이트 길이만큼 잘린 문자가 이름에 들어감 때문에 출력이 달라서 Fail 발생
+	   temp_buf의 크기가 16인 이유는 애초에 이름으로 자르는 크기가 16이기때문에 굳이 더 크게 만들 필요가 없음 */
+	char* save_ptr, temp_buf[16], *token;
+	/* temp_buf에 file_name을 temp_buf길이만큼 복사함 */
+	strlcpy(temp_buf, file_name, sizeof temp_buf);
+	/* 첫번째 인자(이름)만 잘라서 token에 저장 */
+	token = strtok_r(temp_buf, " ", &save_ptr);
+
 	/* FILE_NAME을 실행할 새 스레드를 만든다. */
-	tid = thread_create (file_name, PRI_DEFAULT, initd, fn_copy);
+	tid = thread_create (token, PRI_DEFAULT, initd, fn_copy);
 	if (tid == TID_ERROR)
 		palloc_free_page (fn_copy);
 	return tid;
