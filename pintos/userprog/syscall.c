@@ -9,7 +9,10 @@
 #include "intrinsic.h"
 #include "filesys/file.h"
 #include "lib/kernel/stdio.h"
+#include "threads/synch.h"
 
+/* 공용 락 선언 */
+struct lock filesys_lock;
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
 
@@ -85,6 +88,8 @@ syscall_init (void) {
 			((uint64_t)SEL_KCSEG) << 32);
 	write_msr(MSR_LSTAR, (uint64_t) syscall_entry);
 
+	/* 파일시스템 공용 락 초기화 */
+	lock_init(&filesys_lock);
 	/* syscall_entry가 유저 영역 스택을 커널 모드 스택으로 바꾸기 전까지는
 	 * 인터럽트 서비스 루틴이 어떤 인터럽트도 처리하면 안 된다.
 	 * 따라서 FLAG_FL을 마스킹했다. */
