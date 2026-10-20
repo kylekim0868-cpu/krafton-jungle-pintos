@@ -179,8 +179,8 @@ int syscall_filesize(int fd){
 
 /* 프로세스가 정상적으로 종료되거나 강제 종료되면, 열려 있는 모든 파일 디스크립터가 자동으로 닫힌다 */
 void syscall_close(int fd){
-	/*	
-		Closes file descriptor fd. Exiting or terminating a process implicitly closes all its open file descriptors, as if by calling this function for each one.
-	*/
-
+	/* TODO: fd에 해당되는 file객체를 해제 → file_close()함수 사용 */
+	/* 실행중인 스레드 생성*/
+	struct thread* t = thread_current();
+	flie_close(thread_current()->fd_list[fd]);
 }
