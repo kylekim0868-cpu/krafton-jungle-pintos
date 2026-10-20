@@ -18,6 +18,7 @@
 #include "threads/mmu.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "userprog/syscall.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -176,6 +177,11 @@ process_exec (void *f_name) {
 
 	/* 먼저 현재 문맥(기존 메모리 등)을 없앤다. */
 	process_cleanup ();
+
+	/* 현재 스레드에 fd_list가 생성이 안됬을때만 초기화
+	   무조건 새 페이지를 할당하면 기존에 열어둔 파일들을 잃어버리고  예전 페이지는 해제되지 않고 남음 (메모리 누수 발생) */
+	if(thread_current()->fd_list == NULL)
+		fd_list_init(thread_current());
 
 	/* 그런 다음 바이너리를 로드한다. */
 	success = load (file_name, &_if); /* 새로 ELF로드해서 메모리에 적재 */

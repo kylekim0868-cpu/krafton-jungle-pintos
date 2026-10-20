@@ -7,18 +7,31 @@
 #include "userprog/gdt.h"
 #include "threads/flags.h"
 #include "intrinsic.h"
+#include "filesys/filesys.h" /* 파일 생성·삭제 등 파일 시스템 함수의 선언을 가져온다. */
+#include "threads/synch.h"
+#include "threads/mmu.h"
+#include "threads/vaddr.h"
+#include "threads/mmu.h" /* 페이지 매핑 확인 */
+#include "threads/vaddr.h" /* 유저 주소 영역 확인 */
+#include "filesys/file.h"
+#include "lib/kernel/stdio.h"
 #include "threads/synch.h"
 #include "filesys/filesys.h"
 #include "filesys/file.h"
 #include "threads/palloc.h"
 #include "threads/vaddr.h"
 #include "threads/mmu.h"
+#include "devices/input.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
 
+/* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
+const int fd_list_size = PGSIZE/8; 
+
 void syscall_entry (void);
 void syscall_handler (struct intr_frame *);
+
 int syscall_open(char *file);
 int syscall_filesize(int fd);
 void syscall_close(int fd);
@@ -36,6 +49,86 @@ void syscall_close(int fd);
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
+
+static bool
+check_buffer(void *buffer, unsigned size)
+{
+	if (buffer == NULL) return false;
+	if (size == 0) return true;
+	/* uint8_t로 한 이유는 비트가 8비트가 1byte인데 이렇게
+	   해야 size를 더했을때 정확한 end주소가 나옴 */
+	uint8_t *start = buffer;
+	uint8_t *end = start + size - 1;
+	/* 하나라도 유저영역이 아니면 false */
+	if (!is_user_vaddr(start) || !is_user_vaddr(end))
+		return false;
+
+	/* 버퍼가 걸친 모든 페이지가 매핑돼 있는지 */
+	for (uint8_t *p = pg_round_down(start); p <= end; p += PGSIZE)
+		/* 페이지에 매핑된게 있는지 검사 */
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false;
+	/* 전부 통과시 true */
+	return true;
+}
+
+
+int 
+syscall_write (int fd, void *buffer, unsigned size)
+{	
+	/* 유저 영역인지, 매핑되어있는지 확인 - syscall_exit() 호출로 프로세스 종료 */
+	if (!check_buffer(buffer, size)) return -1; /* syscall_exit() 호출해야함 */
+	/* fd=0 : 잘못된 접근(키보드) false 반환 */
+	if(fd<=0 || fd>=fd_list_size) return -1;
+	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
+	if(fd==1){
+		putbuf(buffer, size);
+		return size;
+	}
+	/* fd>=2 : 표에서 파일 꺼냄 */
+	else if(fd>=2){
+		if(!thread_current()->fd_list[fd])
+			return -1;
+		else{
+			/* lock 처리 */
+			lock_acquire(&filesys_lock);
+			int write_byte = file_write(thread_current()->fd_list[fd], buffer, size);
+			lock_release(&filesys_lock);
+			return write_byte;
+		}
+	}
+}
+
+int
+syscall_read (int fd, void *buffer, unsigned size){
+	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
+	/* 키보드에서 읽어옴 */
+	if(fd==0){
+		uint8_t *buf = buffer;
+		/* 반복문 돌면서 하나씩 받아옴 size만큼 반복 */
+		for(unsigned i=0; i<size; i++){
+			buf[i] = input_getc();
+		}
+		return size;
+	}
+	/* fd=1 : 화면을 의미함으로 맞지 않은 fd임 */
+	else if(fd==1 || fd < 0 || fd>=fd_list_size) 
+		return -1;
+	/* 파일에 접근해서 size만큼 읽어옴 */
+	else{
+		if(!thread_current()->fd_list[fd]) return -1;
+		else{
+			/* lock 처리 */
+			lock_acquire(&filesys_lock);
+			int byte_size = file_read(thread_current()->fd_list[fd], buffer, size);
+			lock_release(&filesys_lock);
+			return byte_size;
+		}
+	}
+}
+
+
 void
 syscall_init (void) {
 	write_msr(MSR_STAR, ((uint64_t)SEL_UCSEG - 0x10) << 48  |
@@ -49,6 +142,28 @@ syscall_init (void) {
 	 * 따라서 FLAG_FL을 마스킹했다. */
 	write_msr(MSR_SYSCALL_MASK,
 			FLAG_IF | FLAG_TF | FLAG_DF | FLAG_IOPL | FLAG_AC | FLAG_NT);
+}
+
+/* Project 2 : 파일 이름을 종료 문자까지 안전하게 읽을 수 있는지 검사한다. */
+static bool
+valid_user_string(const char *str) {
+	if (str == NULL)
+		return false; /* 문자열 주소가 NULL이면 실패합니다. */
+
+	const char *p = str; /* 첫 번째 문자부터 검사하기 위해 현재 위치를 p에 저장합니다. */
+
+	for (;;) {
+		if (!is_user_vaddr(p))
+			return false; /* 현재 주소가 유저 영역 밖이면 실패합니다. 커널 메모리를 파일 이름으로 읽지 못하게 합니다. */
+
+		if (pml4_get_page(thread_current()->pml4, p) == NULL)
+			return false; /* 유저 영역이더라도 실제 메모리가 매핑되지 않은 주소라면 실패합니다. */
+
+		if (*p == '\0')
+			return true; /* 앞의 주소 검사를 통과한 뒤 문자를 읽습니다. 문자열 끝이면 검사 성공입니다. */
+
+		p++; /* 다음 문자로 이동해서 반복합니다. 따라서 문자열이 페이지 경계를 넘어가도 다음 주소를 검사합니다. */
+	}
 }
 
 /* 시스템 콜의 메인 인터페이스 */
@@ -71,10 +186,40 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_WAIT: 
 			break;
-		case SYS_CREATE:
-			break;
-		case SYS_REMOVE:
-			break;
+		case SYS_REMOVE: {
+
+			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
+			
+			if (!valid_user_string(file)) {
+				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
+				f->R.rax = false;
+				return;
+			 }
+			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
+
+			bool result = filesys_remove(file); /* 파일 이름으로 삭제를 시도하고, 성공 여부를 result에 저장한다. */
+			
+			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제한다. */
+
+			f->R.rax = result; /* 삭제 성공 여부를 반환값 레지스터 rax에 저장한다. */
+    }
+		case SYS_CREATE: {
+      const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
+
+      if (!valid_user_string(file)) {
+        /* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
+        f->R.rax = false;
+        return;
+      }
+      lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
+
+      bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
+
+      lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
+
+      f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
+      break;
+    }
 		case SYS_OPEN:
 			f->R.rax = syscall_open((char* )f->R.rdi);
 			break;
@@ -82,8 +227,11 @@ syscall_handler (struct intr_frame *f) {
 			f->R.rax = syscall_filesize(f->R.rdi);
 			break;		
 		case SYS_READ:
+			f->R.rax = syscall_read(f->R.rdi, (void *)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_WRITE:
+			/* buffer는 포인터라서 uint64_t인 rsi가 들어가면 문제가 됨 캐스팅 해야함 */
+			f->R.rax = syscall_write(f->R.rdi, (void*)f->R.rsi, f->R.rdx);
 			break;
 		case SYS_SEEK:
 			break;
@@ -141,8 +289,6 @@ int syscall_open(char* file_name)
 		i++;
 	}
 
-	int fd_list_size = PGSIZE/8; /* 전체 페이지 크기를 파일 포인터 크기 8바이트 나누면 전체 배열 사이즈가 나온다 */
-
 	/* 
 		fd=0,1을 제외하고 2부터 file객체를 push.
 		filesys_open함수를 통해 열린 파일 객체를 2번 idx에 저장. 단, 2번이 있다면 4번.. for문을 돌면서 확인
@@ -150,8 +296,12 @@ int syscall_open(char* file_name)
 	for(int i=2; i<fd_list_size; i++){
 		/* NULL이면 현재 사용하지 않는 fd */
 		if(t->fd_list[i] == NULL){
+			/* 공용 락 등록 */
+			lock_acquire(&filesys_lock);
 			/* 파일을 Open 후 반환된 파일 객체의 주소 저장(i번 FD 테이블에) */
 			t->fd_list[i] = filesys_open(file_name);
+			/* 공용 락 해제 */
+			lock_release(&filesys_lock);
 			/* ✅ 성공: 열린 파일이 NULL X → 등록한 index(fd)반환 후 종료 */
 			if(t->fd_list[i] != NULL){
 				return i;
@@ -169,18 +319,51 @@ int syscall_open(char* file_name)
 int syscall_filesize(int fd){
 	/* 실행 중인 스레드 구조체 선언 */
 	struct thread *t = thread_current();
-	/* fd에 해당하는 file객체가 없다면 프로세스 종료? */
-	if(!(t->fd_list[fd])){
-		thread_exit();
+
+	/* 
+		1) fd가 0이나 1에 접근 시 -1 반환 
+		2) file descriptor 테이블이 없다면 실패 반환
+		3) fd에 해당하는 file 객체가 없다면 실패 반환
+		4) fd가 배열 크기가 같거나 넘을 경우 실패 반환
+	*/
+	if(fd <= 1 || fd >= fd_list_size || !(t->fd_list) || !(t->fd_list[fd])){
+		return -1;
 	}
-	return file_length(t->fd_list[fd]);
+	/* 공용 락 등록 */
+	lock_acquire(&filesys_lock);
+
+	/* 반환값(result) 저장 */
+	int result = file_length(t->fd_list[fd]);
+
+	/* 공용 락 해제 */
+	lock_release(&filesys_lock);
+
+	return result; 
 
 }
 
 /* 프로세스가 정상적으로 종료되거나 강제 종료되면, 열려 있는 모든 파일 디스크립터가 자동으로 닫힌다 */
 void syscall_close(int fd){
-	/* TODO: fd에 해당되는 file객체를 해제 → file_close()함수 사용 */
-	/* 실행중인 스레드 생성*/
 	struct thread* t = thread_current();
-	flie_close(thread_current()->fd_list[fd]);
+	/* 
+		1) fd가 0이나 1에 접근 시 함수 종료
+		2) file descriptor 테이블이 없다면 실패 반환
+		3) fd에 해당하는 file 객체가 없다면 실패 반환
+		4) fd가 배열 크기가 같거나 넘을 경우 실패 반환
+	*/
+	if(fd <= 1 || fd >= fd_list_size || !(t->fd_list) || !(t->fd_list[fd])){
+		return;
+	}
+
+	/* 공용 락 등록 */
+	lock_acquire(&filesys_lock);
+
+	/* fd에 해당되는 file객체를 해제 → file_close()함수 사용 */
+	file_close(t->fd_list[fd]);
+	
+	/* file 객체를 바라보는 포인터도 NULL 초기화 */
+	t->fd_list[fd] = NULL;
+
+	/* 공용 락 해제 */
+	lock_release(&filesys_lock);
 }
