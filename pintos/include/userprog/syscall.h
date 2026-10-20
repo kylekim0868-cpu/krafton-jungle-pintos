@@ -15,5 +15,7 @@ void fd_list_init(struct thread* t);
 int syscall_read (int fd, void *buffer, unsigned size);
 /* write system call */
 int syscall_write (int fd, void *buffer, unsigned size);
+/* exit  system call */
+void syscall_exit(int status);
 
 #endif /* userprog/syscall.h */

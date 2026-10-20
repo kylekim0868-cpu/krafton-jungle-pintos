@@ -9,18 +9,11 @@
 #include "intrinsic.h"
 #include "filesys/filesys.h" /* 파일 생성·삭제 등 파일 시스템 함수의 선언을 가져온다. */
 #include "threads/synch.h"
-#include "threads/mmu.h"
-#include "threads/vaddr.h"
 #include "threads/mmu.h" /* 페이지 매핑 확인 */
 #include "threads/vaddr.h" /* 유저 주소 영역 확인 */
 #include "filesys/file.h"
 #include "lib/kernel/stdio.h"
-#include "threads/synch.h"
-#include "filesys/filesys.h"
-#include "filesys/file.h"
 #include "threads/palloc.h"
-#include "threads/vaddr.h"
-#include "threads/mmu.h"
 #include "devices/input.h"
 
 /* 공용 락 선언 */
@@ -49,8 +42,15 @@ void syscall_close(int fd);
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
 
-/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
 
+void 
+syscall_exit(int status){
+	/* 스레드의 exit_status 필드에 return으로 나온 값 담음 */
+	thread_current()->exit_status = status;
+	thread_exit(); /* process_exit 호출 → 메시지 출력 후 소멸 */
+}
+
+/* buffer ~ buffer+size까지가 유저 영역이 맞는지 매핑이 되어있는지 확인하는 헬퍼 함수 */
 static bool
 check_buffer(void *buffer, unsigned size)
 {
@@ -59,7 +59,7 @@ check_buffer(void *buffer, unsigned size)
 	/* uint8_t로 한 이유는 비트가 8비트가 1byte인데 이렇게
 	   해야 size를 더했을때 정확한 end주소가 나옴 */
 	uint8_t *start = buffer;
-	uint8_t *end = start + size - 1;
+	uint8_t *end = start + size - 1; 
 	/* 하나라도 유저영역이 아니면 false */
 	if (!is_user_vaddr(start) || !is_user_vaddr(end))
 		return false;
@@ -78,8 +78,8 @@ int
 syscall_write (int fd, void *buffer, unsigned size)
 {	
 	/* 유저 영역인지, 매핑되어있는지 확인 - syscall_exit() 호출로 프로세스 종료 */
-	if (!check_buffer(buffer, size)) return -1; /* syscall_exit() 호출해야함 */
-	/* fd=0 : 잘못된 접근(키보드) false 반환 */
+	if (!check_buffer(buffer, size)) syscall_exit(-1);
+	/* fd=0 : 잘못된 접근(키보드) -1 반환 */
 	if(fd<=0 || fd>=fd_list_size) return -1;
 	/* fd=1 : 콘솔에 출력 putbuf함수는 커널이 화면에 글자를 찍는 함수  */
 	if(fd==1){
@@ -102,7 +102,7 @@ syscall_write (int fd, void *buffer, unsigned size)
 
 int
 syscall_read (int fd, void *buffer, unsigned size){
-	if(!check_buffer(buffer, size)) return -1; /* syscall_exit(-1)로 종료해야함 */
+	if(!check_buffer(buffer, size)) syscall_exit(-1);
 	/* 키보드에서 읽어옴 */
 	if(fd==0){
 		uint8_t *buf = buffer;
@@ -179,7 +179,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_HALT: 
 			break;
 		case SYS_EXIT: 
-			break;
+			syscall_exit(f->R.rdi);
 		case SYS_FORK: 
 			break;
 		case SYS_EXEC: 
@@ -202,24 +202,24 @@ syscall_handler (struct intr_frame *f) {
 			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제한다. */
 
 			f->R.rax = result; /* 삭제 성공 여부를 반환값 레지스터 rax에 저장한다. */
-    }
+    	}
 		case SYS_CREATE: {
-      const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
+			const char *file = (const char *) f->R.rdi; /* rdi에 들어 있는 값을 파일 이름 문자열의 주소로 해석해서, 포인터 변수 file에 저장 */
 
-      if (!valid_user_string(file)) {
-        /* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
-        f->R.rax = false;
-        return;
-      }
-      lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
+			if (!valid_user_string(file)) {
+				/* TODO : 공통 EXIT 구현 후 종료 상태 -1로 종료하도록 변경한다. */
+				f->R.rax = false;
+				return;
+			}
+			lock_acquire(&filesys_lock); /* 다른 파일 시스템 작업이 끝날 때까지 기다린 뒤 락을 획득합니다. */
 
-      bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
+			bool result = filesys_create(file, (unsigned) f->R.rsi); /* rdi의 파일 이름과 rsi의 초기 크기로 생성하고, 성공 여부를 반환값 레지스터 rax에 저장한다. */
 
-      lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
+			lock_release(&filesys_lock); /* 다른 작업이 진행할 수 있도록 락을 해제합니다. */
 
-      f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
-      break;
-    }
+			f->R.rax = result; /* 생성 결과를 유저에게 전달한 반환값으로 저장합니다. */
+			break;
+		}
 		case SYS_OPEN:
 			f->R.rax = syscall_open((char* )f->R.rdi);
 			break;
@@ -243,8 +243,7 @@ syscall_handler (struct intr_frame *f) {
 		default:
 			break;
 	}	
-	
-	printf ("system call!\n");
+	// printf ("system call!\n");
 }
 
 /* 
@@ -255,6 +254,7 @@ void fd_list_init(struct thread* t){
 	t->fd_list = palloc_get_page(PAL_ZERO);
 	if(!(t->fd_list)){
 		thread_exit(); /* 프로세스 종료 */
+		return -1;
 	}
 }
 
@@ -262,9 +262,9 @@ int syscall_open(char* file_name)
 {
 	struct thread *t = thread_current();
 
-	/* ✔︎ 사용자 가상 주소 범위인지 확인 */
+	/* ✔︎ 사용자 가상 주소 범위인지 file_name이 비어있지 않은지 페이지에 해당되는지 확인 */
 	if(!is_user_vaddr(file_name) || file_name == NULL || !(pml4_get_page(t->pml4, file_name))){
-		thread_exit(); /* SYS_EXIT 함수가 구현되면 이 위치에 들어감 */
+		syscall_exit(-1);
 	}
 
 	/* fd테이블이 비었다면 페이지 전체를 NULL로 초기화 */
@@ -280,7 +280,7 @@ int syscall_open(char* file_name)
 			→ 침범했다면 thread_exit();
 		*/
 		if(!(is_user_vaddr(file_name+i)) || !(pml4_get_page(t->pml4, file_name+i))){
-			thread_exit();
+			syscall_exit(-1);
 		}
 		/* 문자열의 끝 문자를 만났다면 break */
 		if(file_name[i] == '\0'){
