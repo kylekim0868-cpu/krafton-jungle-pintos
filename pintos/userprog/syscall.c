@@ -168,7 +168,7 @@ int syscall_filesize(int fd){
 	/* 실행 중인 스레드 구조체 선언 */
 	struct thread *t = thread_current();
 	/* fd에 해당하는 file객체가 없다면 프로세스 종료? */
-	if(t->fd_list[fd]){
+	if(!(t->fd_list[fd])){
 		thread_exit();
 	}
 	return file_length(t->fd_list[fd]);
