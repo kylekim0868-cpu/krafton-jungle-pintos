@@ -27,10 +27,7 @@ void syscall_handler (struct intr_frame *);
 
 int syscall_open(char *file);
 int syscall_filesize(int fd);
-int syscall_write(int fd, void *buffer, unsigned size);
-int syscall_read (int fd, void *buffer, unsigned size);
-void syscall_exit(int status);
-
+void syscall_close(int fd);
 
 /* 시스템 콜.
  *
@@ -241,6 +238,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_TELL:
 			break;
 		case SYS_CLOSE:
+			syscall_close(f->R.rdi);
 			break;
 		default:
 			break;
@@ -298,8 +296,12 @@ int syscall_open(char* file_name)
 	for(int i=2; i<fd_list_size; i++){
 		/* NULL이면 현재 사용하지 않는 fd */
 		if(t->fd_list[i] == NULL){
+			/* 공용 락 등록 */
+			lock_acquire(&filesys_lock);
 			/* 파일을 Open 후 반환된 파일 객체의 주소 저장(i번 FD 테이블에) */
 			t->fd_list[i] = filesys_open(file_name);
+			/* 공용 락 해제 */
+			lock_release(&filesys_lock);
 			/* ✅ 성공: 열린 파일이 NULL X → 등록한 index(fd)반환 후 종료 */
 			if(t->fd_list[i] != NULL){
 				return i;
@@ -317,10 +319,51 @@ int syscall_open(char* file_name)
 int syscall_filesize(int fd){
 	/* 실행 중인 스레드 구조체 선언 */
 	struct thread *t = thread_current();
-	/* fd에 해당하는 file객체가 없다면 프로세스 종료? */
-	if(!(t->fd_list[fd])){
-		syscall_exit(-1);
-	}
-	return file_length(t->fd_list[fd]);
 
+	/* 
+		1) fd가 0이나 1에 접근 시 -1 반환 
+		2) file descriptor 테이블이 없다면 실패 반환
+		3) fd에 해당하는 file 객체가 없다면 실패 반환
+		4) fd가 배열 크기가 같거나 넘을 경우 실패 반환
+	*/
+	if(fd <= 1 || fd >= fd_list_size || !(t->fd_list) || !(t->fd_list[fd])){
+		return -1;
+	}
+	/* 공용 락 등록 */
+	lock_acquire(&filesys_lock);
+
+	/* 반환값(result) 저장 */
+	int result = file_length(t->fd_list[fd]);
+
+	/* 공용 락 해제 */
+	lock_release(&filesys_lock);
+
+	return result; 
+
+}
+
+/* 프로세스가 정상적으로 종료되거나 강제 종료되면, 열려 있는 모든 파일 디스크립터가 자동으로 닫힌다 */
+void syscall_close(int fd){
+	struct thread* t = thread_current();
+	/* 
+		1) fd가 0이나 1에 접근 시 함수 종료
+		2) file descriptor 테이블이 없다면 실패 반환
+		3) fd에 해당하는 file 객체가 없다면 실패 반환
+		4) fd가 배열 크기가 같거나 넘을 경우 실패 반환
+	*/
+	if(fd <= 1 || fd >= fd_list_size || !(t->fd_list) || !(t->fd_list[fd])){
+		return;
+	}
+
+	/* 공용 락 등록 */
+	lock_acquire(&filesys_lock);
+
+	/* fd에 해당되는 file객체를 해제 → file_close()함수 사용 */
+	file_close(t->fd_list[fd]);
+	
+	/* file 객체를 바라보는 포인터도 NULL 초기화 */
+	t->fd_list[fd] = NULL;
+
+	/* 공용 락 해제 */
+	lock_release(&filesys_lock);
 }
