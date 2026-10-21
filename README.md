@@ -44,7 +44,8 @@ KAIST Pintos의 Project 2(User Programs)을 팀 단위로 구현하는 프로젝
 
 - 설계 방향과 공통 자료구조를 논의한 후 구현을 분담합니다.
 - 작업별 브랜치에서 개발하고 Pull Request(PR)를 통해 코드 리뷰를 요청합니다.
-- 팀원 간 리뷰와 합의를 거친 코드만 `main` 브랜치에 병합합니다.
+- 팀원 간 리뷰와 합의를 거친 코드만 `develop` 브랜치에 병합합니다.
+- `develop`에서 병합한 코드들의 통합 테스트를 모두 거친 후 `main` 브랜치에 병합합니다.
 - 매일 코어타임에 작업 진행 상황과 PR을 함께 확인합니다.
 - 세부 개발 규칙은 팀 개발 규칙 문서를 따릅니다.
 
@@ -59,6 +60,8 @@ KAIST Pintos의 Project 2(User Programs)을 팀 단위로 구현하는 프로젝
 - 브랜치 이름과 PR 제목에 관련 Jira 이슈 키를 포함합니다.
 - 작업 분담 및 일정 변경 사항은 Jira에 반영합니다.
 
+📌 **[Jira 프로젝트 보드 확인하기](https://kylekim0868.atlassian.net/jira/software/projects/SOT/boards/5?filter=&groupBy=none)**
+
 ### 코드 리뷰 및 병합
 
 **매일 21:00 ~ 23:00**
@@ -71,6 +74,15 @@ KAIST Pintos의 Project 2(User Programs)을 팀 단위로 구현하는 프로젝
 
 > 브랜치 네이밍, 커밋 메시지, PR 작성 및 병합 규칙은
 > [팀 개발 규칙](./pintos/README.md)을 참고합니다.
+
+## 🧪 테스트 결과
+
+| Project | Score | Details |
+|---------|-------|---------|
+| Threads | 32/32 | [상세 결과](docs/tests/project1-threads.md) |
+| User Programs | 미검증 | [상세 결과](docs/tests/project2-user-program.md) |
+| Virtual Memory | 미검증 | [상세 결과](docs/tests/project3-virtual-memory.md) |
+
 
 ## 📚 참고 자료
 
