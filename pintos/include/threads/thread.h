@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -98,9 +99,23 @@ struct thread {
 	struct lock *waiting_lock; /* 현재 기다리는 Lock 참조 */
 	struct list donations; /* 기부자 목록 관리 */
 	struct list_elem donate_elem; /* 기부자 목록용 list_elem ★ 기부용 list_elem을 만든 이유는 한 스레드가 동시에 락 대기목록/우선순위 기부목록에 저장되어야 하기 때문이다 */
+	struct file** fd_list; /* 파일 포인터 배열(FD 테이블) */
+
+	 /* fork, wait 시스템 콜 전용 필드 */
+    struct intr_frame *parents_if;  /* fork시점 부모 프로세스 */
+	struct semaphore parent_wait_sema; /* 부모가 기다리는 wait sema */
+	struct semaphore child_wait_sema; /* 자식이 기다리는 wait sema */
+    struct semaphore fork_sema; /* fork됬는지 확인 */
+	bool wait_called; /* wait 호출여부 저장 */
+    int success_flag;               /* fork 성공여부 저장 */
+    struct list kid_list;           /* 자식 대기 리스트 */
+    struct list_elem kid_elem;      /* 자식 elem - 연결용 */
 
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
+
+	/* 종료용 필드 */
+	int exit_status;
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */

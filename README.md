@@ -1,11 +1,11 @@
-# 🖥️ Pintos Project 2 · Threads
+# 🖥️ Pintos Project 2 · User Programs
 
-KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝트입니다.
+KAIST Pintos의 Project 2(User Programs)을 팀 단위로 구현하는 프로젝트입니다.
 
 ## 🎯 프로젝트 목표
 
 - Project 2의 모든 필수 요구사항 구현
-- 최종 `main` 브랜치에서 필수 테스트 통과
+- `dev` 브랜치에서 필수 테스트 통과 후 최종 `main` 브랜치에 병합
 - 구현 과정과 트러블슈팅을 정리하여 주간 공유 발표 진행
 
 ## 👥 팀 구성
@@ -13,7 +13,7 @@ KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝�
 | 프로필 | 이름 | GitHub |
 |:---:|:---:|:---:|
 | <img src="https://github.com/kylekim0868-cpu.png" width="80" height="80"> | 김영민 | [@kylekim0868-cpu](https://github.com/kylekim0868-cpu) |
-| <img src="https://github.com/xi.crebig.png" width="80" height="80"> | 국환 | [xi.crebig](https://github.com/xi.crebig) |
+| <img src="https://github.com/kuk-hwan.png" width="80" height="80"> | 국환 | [@kuk-hwan](https://github.com/kuk-hwan) |
 | <img src="https://github.com/picky232.png" width="80" height="80"> | 신지호 | [@picky232](https://github.com/picky232) |
 ## 🛠️ 개발 환경
 
@@ -33,9 +33,12 @@ KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝�
 ## 🚧 진행 상황
 
 - **Project 1 (Threads)**: 구현 완료 후 `main`에 병합됨
-- **Project 2 (User Programs)**: 진행 중 (`Project2userprog` 브랜치)
-  - `userprog/` 소스(`process.c`, `syscall.c`, `exception.c`, `gdt.c`, `tss.c`)의 영어 주석을 한국어로 번역함 (코드 변경 없음)
-  - 다음 작업: 인자 전달(argument passing) → 시스템 콜 → `process_wait`/`process_exit`
+  - 상세 결과: [Project 1 테스트 결과](./pintos/docs/project1-threads.md)
+- **Project 2 (User Programs)**: 구현 및 테스트 완료 후 `main`에 병합
+  - 인자 전달, 기본 시스템 콜, `fork`/`exec`/`wait` 및 파일 시스템 기본 테스트 통과
+  - 전체 테스트(Threads 회귀 테스트 포함): **95개 중 85개 PASS / 10개 FAIL**, 최종 환산 점수 **80.5 / 100**
+  - 남은 작업: 실행 파일 쓰기 보호(`rox` 3개), 예외 처리(`bad-*` 6개), 메모리 부족 처리(`multi-oom` 1개)의 실패 원인 분석 및 개선
+  - 상세 결과: [Project 2 테스트 결과](./pintos/docs/project2-user-program.md)
 
 ## 🤝 협업 방식
 
@@ -90,4 +93,4 @@ KAIST Pintos의 Project 2(User Program)을 팀 단위로 구현하는 프로젝�
 
 ---
 
-**Pintos Project 2 · User Program**
+**Pintos Project 2 · User Programs**
