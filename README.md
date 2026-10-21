@@ -1,11 +1,11 @@
-# 🖥️ Pintos Project 1 · Threads
+# 🖥️ Pintos Project 2 · User Programs
 
-KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입니다.
+KAIST Pintos의 Project 2(User Programs)을 팀 단위로 구현하는 프로젝트입니다.
 
 ## 🎯 프로젝트 목표
 
-- Project 1의 모든 필수 요구사항 구현
-- 최종 `main` 브랜치에서 필수 테스트 통과
+- Project 2의 모든 필수 요구사항 구현
+- `dev` 브랜치에서 필수 테스트 통과 후 최종 `main` 브랜치에 병합
 - 구현 과정과 트러블슈팅을 정리하여 주간 공유 발표 진행
 
 ## 👥 팀 구성
@@ -13,8 +13,8 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 | 프로필 | 이름 | GitHub |
 |:---:|:---:|:---:|
 | <img src="https://github.com/kylekim0868-cpu.png" width="80" height="80"> | 김영민 | [@kylekim0868-cpu](https://github.com/kylekim0868-cpu) |
-| <img src="https://github.com/Leo-2894.png" width="80" height="80"> | 김도영 | [@Leo-2894](https://github.com/Leo-2894) |
-| <img src="https://github.com/soheesgit.png" width="80" height="80"> | 문소희 | [@soheesgit](https://github.com/soheesgit) |
+| <img src="https://github.com/kuk-hwan.png" width="80" height="80"> | 국환 | [@kuk-hwan](https://github.com/kuk-hwan) |
+| <img src="https://github.com/picky232.png" width="80" height="80"> | 신지호 | [@picky232](https://github.com/picky232) |
 ## 🛠️ 개발 환경
 
 | 항목 | 환경 |
@@ -33,15 +33,19 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 ## 🚧 진행 상황
 
 - **Project 1 (Threads)**: 구현 완료 후 `main`에 병합됨
-- **Project 2 (User Programs)**: 진행 중 (`Project2userprog` 브랜치)
-  - `userprog/` 소스(`process.c`, `syscall.c`, `exception.c`, `gdt.c`, `tss.c`)의 영어 주석을 한국어로 번역함 (코드 변경 없음)
-  - 다음 작업: 인자 전달(argument passing) → 시스템 콜 → `process_wait`/`process_exit`
+  - 상세 결과: [Project 1 테스트 결과](./pintos/docs/project1-threads.md)
+- **Project 2 (User Programs)**: 구현 및 테스트 완료 후 `main`에 병합
+  - 인자 전달, 기본 시스템 콜, `fork`/`exec`/`wait` 및 파일 시스템 기본 테스트 통과
+  - 전체 테스트(Threads 회귀 테스트 포함): **95개 중 85개 PASS / 10개 FAIL**, 최종 환산 점수 **80.5 / 100**
+  - 남은 작업: 실행 파일 쓰기 보호(`rox` 3개), 예외 처리(`bad-*` 6개), 메모리 부족 처리(`multi-oom` 1개)의 실패 원인 분석 및 개선
+  - 상세 결과: [Project 2 테스트 결과](./pintos/docs/project2-user-program.md)
 
 ## 🤝 협업 방식
 
 - 설계 방향과 공통 자료구조를 논의한 후 구현을 분담합니다.
 - 작업별 브랜치에서 개발하고 Pull Request(PR)를 통해 코드 리뷰를 요청합니다.
-- 팀원 간 리뷰와 합의를 거친 코드만 `main` 브랜치에 병합합니다.
+- 팀원 간 리뷰와 합의를 거친 코드만 `develop` 브랜치에 병합합니다.
+- `develop`에서 병합한 코드들의 통합 테스트를 모두 거친 후 `main` 브랜치에 병합합니다.
 - 매일 코어타임에 작업 진행 상황과 PR을 함께 확인합니다.
 - 세부 개발 규칙은 팀 개발 규칙 문서를 따릅니다.
 
@@ -56,6 +60,8 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 - 브랜치 이름과 PR 제목에 관련 Jira 이슈 키를 포함합니다.
 - 작업 분담 및 일정 변경 사항은 Jira에 반영합니다.
 
+📌 **[Jira 프로젝트 보드 확인하기](https://kylekim0868.atlassian.net/jira/software/projects/SOT/boards/5?filter=&groupBy=none)**
+
 ### 코드 리뷰 및 병합
 
 **매일 21:00 ~ 23:00**
@@ -69,6 +75,15 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 > 브랜치 네이밍, 커밋 메시지, PR 작성 및 병합 규칙은
 > [팀 개발 규칙](./pintos/README.md)을 참고합니다.
 
+## 🧪 테스트 결과
+
+| Project | Score | Details |
+|---------|-------|---------|
+| Threads | 32/32 | [상세 결과](docs/tests/project1-threads.md) |
+| User Programs | 미검증 | [상세 결과](docs/tests/project2-user-program.md) |
+| Virtual Memory | 미검증 | [상세 결과](docs/tests/project3-virtual-memory.md) |
+
+
 ## 📚 참고 자료
 
 - [KAIST Pintos 공식 매뉴얼](https://casys-kaist.github.io/pintos-kaist/)
@@ -78,4 +93,4 @@ KAIST Pintos의 Project 1(Threads)을 팀 단위로 구현하는 프로젝트입
 
 ---
 
-**Pintos Project 1 · Threads**
+**Pintos Project 2 · User Programs**
