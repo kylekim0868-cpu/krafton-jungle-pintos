@@ -236,8 +236,6 @@ __do_fork (void *aux) {
 		/* 복제 성공을 부모에게 알림. 반드시 sema_up보다 먼저 써야 함
 		   (부모는 깨어나자마자 이 플래그를 읽기 때문) */
 		parent->success_flag = 1;
-		/* wait를 위해 sema_up하기전 먼저 자식 스레드를 부모스레드의 대기 리스트에 넣어줌 */
-		list_push_back(&parent->kid_list, &current->kid_elem);
 		/* 부모를 깨움 → 부모의 process_fork가 sema_down에서 풀려 자식 tid를 리턴함 */
 		sema_up(&parent->fork_sema);
 		/* 복사해 둔 레지스터(if_, rax=0)로 유저 모드 진입 → 자식은 fork() 다음 줄부터 실행되고 0을 받음 */
@@ -247,6 +245,7 @@ error:
 	/* 실패 경로. 이 코드가 없으면 부모가 sema_down에서 영원히 잠들어 버림 */
 	/* 자식 자신의 종료 코드를 -1로 (부모의 exit_status가 아니라 current의 것이어야 함) */
 	current->exit_status = -1;
+	list_remove(&current->kid_elem);   /* 추가: 죽을 자식을 부모 목록에서 제거 */
 	/* success_flag는 0 그대로이므로 부모는 깨어나서 TID_ERROR를 리턴함 */
 	sema_up(&parent->fork_sema);
 	thread_exit();

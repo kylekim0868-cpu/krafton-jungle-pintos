@@ -218,6 +218,9 @@ thread_create (const char *name, int priority,
 	t->tf.cs = SEL_KCSEG; // 코드 세그먼트에 커널용 선택자를 설정
 	t->tf.eflags = FLAG_IF; // 플래그의 인터럽트 허용 비트를 설정
 
+	/* 만든 스레드를 만든 쪽(부모)의 자식 목록에 등록 */
+	list_push_back (&thread_current ()->kid_list, &t->kid_elem);
+
 	/* Add to run queue. */
 	thread_unblock (t); // thread_unblock 함수는 새 스레드 상태를 바꾸기 위해 인터럽트를 끄고 READY로 바꿔 ready-list에 연결한다
 
