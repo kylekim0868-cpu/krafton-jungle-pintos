@@ -481,6 +481,14 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->base_priority = t->priority;
 	t->waiting_lock = NULL;
 	list_init(&t->donations);
+
+	/* wait_called 필드 초기화 */
+	t->wait_called = false;
+	/* parent_wait_sema 필드 초기화 */
+	sema_init(&t->parent_wait_sema, 0);
+	/* child_wait_sema 필드 초기화 */
+	sema_init(&t->child_wait_sema, 0);
+  
 	/* fork 초기화 */
 	list_init(&t->kid_list);		/* 자식 목록: 처음엔 비어 있음 */
 	sema_init(&t->fork_sema, 0);	/* 0으로 시작해야 부모가 sema_down 하자마자 자식을 기다리며 잠듦 */
