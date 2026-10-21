@@ -86,10 +86,29 @@ initd (void *f_name) {
 /* 현재 프로세스를 `name`이라는 이름으로 복제한다. 새 프로세스의
  * 스레드 id를 리턴하고, 스레드를 만들 수 없으면 TID_ERROR를 리턴한다. */
 tid_t
-process_fork (const char *name, struct intr_frame *if_ UNUSED) {
+process_fork (const char *name, struct intr_frame *if_) {
 	/* 현재 스레드를 새 스레드로 복제한다. */
-	return thread_create (name,
-			PRI_DEFAULT, __do_fork, thread_current ());
+	/* [부모 쪽 흐름] 재료 넘기기 → 자식 생성 → 자식이 복제를 끝낼 때까지 대기 → 결과 판정 */
+	struct thread *parent = thread_current();
+	/* 이전 fork의 결과가 남아 있으면 안 되므로 "실패(0)"로 먼저 리셋.
+	   자식이 복제에 성공했을 때만 1로 바꿔 준다. */
+	parent->success_flag = 0;
+	/* 자식은 parent->tf가 아니라 시스템 콜 진입 시점의 유저 레지스터(if_)가 필요함.
+	   그래서 부모 스레드에 포인터를 저장해 두면 자식이 꺼내 쓴다.
+	   (부모는 아래 sema_down에서 잠들어 있으므로 if_가 사라질 걱정은 없음) */
+	parent->parents_if = if_;
+	tid_t kid_tid = thread_create (name, PRI_DEFAULT, __do_fork, thread_current ());
+	/* TID_ERROR는 "스레드 생성 자체"가 실패했다는 뜻. 이 경우 자식이 없으니 기다릴 필요도 없음. */
+	if(kid_tid == TID_ERROR)
+		return TID_ERROR;
+	/* fork_sema의 초기값은 0 → 자식이 sema_up 하기 전까지 부모는 여기서 잠듦.
+	   (복제가 끝나기 전에 fork()에서 리턴하면 안 되기 때문) */
+	sema_down(&parent->fork_sema);
+	/* 복제(메모리/fd)의 성공 여부는 thread_create가 아니라 자식이 남긴 플래그로 판단 */
+	if(parent->success_flag == 0)
+		return TID_ERROR;
+	else
+		return kid_tid;	/* 부모는 자식의 tid를 받음 (자식은 0을 받음) */
 }
 
 #ifndef VM
@@ -99,28 +118,49 @@ static bool
 duplicate_pte (uint64_t *pte, void *va, void *aux) {
 	struct thread *current = thread_current ();
 	struct thread *parent = (struct thread *) aux;
-	void *parent_page;
-	void *newpage;
-	bool writable;
+	void *parent_page;	/* 부모 pml4에서 va에 매핑된 물리 프레임의 커널 가상주소를 담음 */
+	void *newpage;		/* 새로운 페이지 할당 후 할당 결과(실패:NULL/성공:새로 할당된 페이지의 주소(포인터)) */
+	bool writable;		/* 부모 페이지가 쓰기 가능한지 확인후 설정(True: 작성가능/False: 작성 불가능) */
+
+	/* [역할] pml4_for_each가 부모의 페이지 테이블 엔트리(PTE)를 하나씩 넘겨 줌.
+	   한 번 호출될 때마다 "유저 페이지 1장"을 자식에게 똑같이 복사한다.
+	   true를 리턴하면 다음 PTE로 계속, false를 리턴하면 순회가 중단되고 fork 실패. */
 
 	/* 1. TODO: parent_page가 커널 페이지라면 바로 리턴한다. */
-
+	/* pml4_for_each는 커널 영역 매핑까지 전부 순회함.
+	   커널 매핑은 자식의 pml4_create가 이미 만들어 두었으니 복사 대상이 아님.
+	   → 에러가 아니라 "건너뛰기"이므로 true를 리턴.
+	   검사 대상은 parent_page가 아니라 va (parent_page는 항상 커널 주소라서 의미가 없고,
+	   커널 va를 pml4_get_page에 넘기면 ASSERT로 패닉이 나므로 호출 전에 걸러야 함). */
+	if(is_kernel_vaddr(va))
+		return true;
 	/* 2. 부모의 pml4(page map level 4)에서 VA에 해당하는 페이지를 찾는다. */
 	parent_page = pml4_get_page (parent->pml4, va);
-
 	/* 3. TODO: 자식을 위해 PAL_USER 페이지를 새로 할당하고
 	 *    TODO: 그 결과를 NEWPAGE에 담는다. */
-
+	/* 새 페이지를 할당 */
+	/* 자식 전용 빈 페이지 1장 확보 (PAL_USER = 유저 풀에서 할당). 메모리 부족이면 NULL */
+	newpage = palloc_get_page(PAL_USER);
+	/* 할당 실패 → 복제 불가능하므로 순회 중단(fork 실패) */
+	if(!newpage)
+		return false;
 	/* 4. TODO: 부모의 페이지를 새 페이지에 복사하고,
 	 *    TODO: 부모의 페이지가 쓰기 가능한지 확인해서
 	 *    TODO: 그 결과에 따라 WRITABLE을 설정한다. */
-
-	/* 5. 새 페이지를 자식의 페이지 테이블에 주소 VA로, WRITABLE 권한과 함께
-	 *    추가한다. */
+	/* 부모 페이지 내용을 4KB 통째로 복사 → 자식은 부모와 "내용만 같고 서로 독립된" 메모리를 가짐 */
+	memcpy(newpage, parent_page, PGSIZE);
+	/* 부모 PTE의 쓰기 비트를 그대로 물려줌 (코드 영역처럼 읽기 전용이면 자식도 읽기 전용) */
+	writable = is_writable(pte);
+	/* 5. 새 페이지를 자식의 페이지 테이블에 주소 VA로, WRITABLE 권한과 함께 추가한다. */
+	/* 부모와 같은 가상주소(va)에 새 페이지를 연결 → 자식 입장에서 주소는 그대로, 실제 메모리만 다름 */
 	if (!pml4_set_page (current->pml4, va, newpage, writable)) {
 		/* 6. TODO: 페이지 삽입에 실패하면 에러 처리를 한다. */
+		/* 이미 할당한 newpage는 자식 pml4에 연결되지 못했으므로 직접 반납해야 메모리 누수가 없음 */
+		palloc_free_page(newpage);
+		/* 실패 상태 반환 */
+		return false;
 	}
-	return true;
+	return true;	/* 이 페이지 복제 성공 → 다음 PTE로 */
 }
 #endif
 
@@ -134,23 +174,32 @@ __do_fork (void *aux) {
 	struct thread *parent = (struct thread *) aux;
 	struct thread *current = thread_current ();
 	/* TODO: parent_if(즉, process_fork()의 if_)를 어떻게든 전달할 것. */
-	struct intr_frame *parent_if;
+	/* [자식 쪽 흐름] 레지스터 복사 → 메모리 복제 → fd 복제 → 부모 깨우기 → 유저 모드로 진입
+	   어느 단계든 실패하면 error 라벨로 가서 부모에게 "실패"를 알리고 종료한다. */
+	/* process_fork가 부모 스레드에 저장해 둔 "fork 시점의 유저 레지스터" */
+	struct intr_frame *parent_if = parent->parents_if;
 	bool succ = true;
 
 	/* 1. CPU 문맥을 로컬 스택으로 읽어 온다. */
 	memcpy (&if_, parent_if, sizeof (struct intr_frame));
-
+	/* 현재는 부모의 리턴값을 그대로 복사해옴 때문에 자신이 부모라고 착각함
+	   자식의 리턴값은 0이여야하기때문에 0으로 설정해줌 */
+	if_.R.rax = 0;
 	/* 2. 페이지 테이블(PT)을 복제한다. */
+	/* 자식 전용 빈 페이지 테이블 생성 (커널 매핑은 여기서 자동으로 채워짐) */
 	current->pml4 = pml4_create();
 	if (current->pml4 == NULL)
 		goto error;
 
+	/* 자식의 페이지 테이블을 CPU에 활성화 (이후 pml4_set_page 등이 이 테이블을 대상으로 함) */
 	process_activate (current);
 #ifdef VM
 	supplemental_page_table_init (&current->spt);
 	if (!supplemental_page_table_copy (&current->spt, &parent->spt))
 		goto error;
 #else
+	/* 부모의 모든 PTE에 대해 duplicate_pte를 호출 → 유저 페이지를 한 장씩 자식에게 복사.
+	   하나라도 false를 리턴하면(메모리 부족 등) 여기서 실패 처리 */
 	if (!pml4_for_each (parent->pml4, duplicate_pte, parent))
 		goto error;
 #endif
@@ -160,14 +209,47 @@ __do_fork (void *aux) {
 	 * TODO:       `file_duplicate`를 사용한다. 부모는 이 함수가 부모의
 	 * TODO:       자원을 성공적으로 복제할 때까지 fork()에서 리턴하면
 	 * TODO:       안 된다는 점에 유의할 것. */
+	/* 자식 전용 fd 테이블(빈 페이지)을 새로 만듦. 부모 테이블을 그대로 공유하면 안 됨
+	   (한쪽이 close하면 다른 쪽도 영향을 받기 때문). 할당 실패 시 fork 실패 */
+	if(!fd_list_init(current))
+		goto error;
+	/* fd 테이블 한 장(PGSIZE)에 들어가는 칸 수 (포인터 1개 = 8바이트) */
+	int fd_list_size = PGSIZE/8;
+	/* 0번(stdin), 1번(stdout)은 파일 객체가 없으므로 2번부터 순회 */
+	for(int i=2; i<fd_list_size; i++){
+		/* 부모가 열어 둔 파일이 있는 칸만 복제 (NULL 칸은 자식도 NULL로 둠) */
+		if(parent->fd_list[i]!=NULL){
+			/* file_duplicate : 인자쪽 파일을 복제해서 그 복사본을 반환해주는 함수 */
+			current->fd_list[i] = file_duplicate(parent->fd_list[i]);
+			/* 복제 실패(NULL)면 fork 실패. 반드시 위의 바깥 if 안에 있어야 함
+			   (밖에 두면 부모의 빈 칸마다 실패로 처리되어 fork가 항상 실패함) */
+			if(!current->fd_list[i]){
+				goto error;
+			}
+		}
+	}
 
 	process_init ();
 
 	/* 마지막으로, 새로 만든 프로세스로 전환한다. */
-	if (succ)
+	if (succ){
+		/* 복제 성공을 부모에게 알림. 반드시 sema_up보다 먼저 써야 함
+		   (부모는 깨어나자마자 이 플래그를 읽기 때문) */
+		parent->success_flag = 1;
+		/* wait를 위해 sema_up하기전 먼저 자식 스레드를 부모스레드의 대기 리스트에 넣어줌 */
+		list_push_back(&parent->kid_list, &current->kid_elem);
+		/* 부모를 깨움 → 부모의 process_fork가 sema_down에서 풀려 자식 tid를 리턴함 */
+		sema_up(&parent->fork_sema);
+		/* 복사해 둔 레지스터(if_, rax=0)로 유저 모드 진입 → 자식은 fork() 다음 줄부터 실행되고 0을 받음 */
 		do_iret (&if_);
+	}
 error:
-	thread_exit ();
+	/* 실패 경로. 이 코드가 없으면 부모가 sema_down에서 영원히 잠들어 버림 */
+	/* 자식 자신의 종료 코드를 -1로 (부모의 exit_status가 아니라 current의 것이어야 함) */
+	current->exit_status = -1;
+	/* success_flag는 0 그대로이므로 부모는 깨어나서 TID_ERROR를 리턴함 */
+	sema_up(&parent->fork_sema);
+	thread_exit();
 }
 
 /* 현재 실행 문맥을 f_name의 프로그램으로 바꾼다(기존 프로세스 이미지를
@@ -182,7 +264,7 @@ process_exec (void *f_name) {
 	 * 현재 스레드가 재스케줄될 때 실행 정보가 그 멤버에
 	 * 저장되기 때문이다. 그래서 로컬 변수 _if를 쓴다. */
 	struct intr_frame _if;
-	_if.ds = _if.es = _if.ss = SEL_UDSEG;
+	_if.ds = _if.es = _if.ss = SEL_UDSEG; /* 데이터·스택 관련 세그먼트 값들을 유저 모드용 값으로 설정합니다. */
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
@@ -191,9 +273,11 @@ process_exec (void *f_name) {
 
 	/* 현재 스레드에 fd_list가 생성이 안됬을때만 초기화
 	   무조건 새 페이지를 할당하면 기존에 열어둔 파일들을 잃어버리고  예전 페이지는 해제되지 않고 남음 (메모리 누수 발생) */
-	if(thread_current()->fd_list == NULL)
-		fd_list_init(thread_current());
-
+	if(thread_current()->fd_list == NULL){
+		/* 포인터 오류가 아니라 커널 자원(메모리) 부족이므로 exit(-1)이 아니라 -1 리턴으로 exec 실패 처리 */
+		if(!fd_list_init(thread_current()))
+			return -1;
+	}
 	/* 그런 다음 바이너리를 로드한다. */
 	success = load (file_name, &_if); /* 새로 ELF로드해서 메모리에 적재 */
 
@@ -212,7 +296,7 @@ process_exec (void *f_name) {
  * 리턴한다. 커널에 의해 종료됐다면(즉, 예외로 인해 죽임을 당했다면)
  * -1을 리턴한다. TID가 유효하지 않거나, 호출한 프로세스의 자식이
  * 아니거나, 해당 TID에 대해 process_wait()가 이미 성공적으로
- * 호출된 적이 있다면, 기다리지 않고 즉시 -1을 리턴한다.
+ ㄱ다면, 기다리지 않고 즉시 -1을 리턴한다.
  *
  * 이 함수는 문제 2-2에서 구현한다. 지금은 아무 일도 하지 않는다. */
 int
@@ -220,8 +304,62 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: 힌트) process_wait(initd)가 리턴하면 pintos가 종료된다.
 	 * XXX:       process_wait를 구현하기 전까지는 여기에 무한 루프를
 	 * XXX:       넣어 두기를 권장한다. */
-	timer_sleep(100);
-	return -1;
+	/* ✔︎ 필요한 정보
+		- 종료 상태 보관할 변수
+		- 부모, 자식 간 관계 조회
+		- child_tid
+		- parent_tid
+		- exit_status
+	*/
+	/* ✔ child_tid(자식)가 호출한 parent_tid의 자식인지? */
+	struct thread* t = thread_current(); /* 실행 중인 스레드 */
+	struct list* kid_list = &t->kid_list; /* 부모 스레드의 자식 리스트 */
+	struct thread* child_t = NULL; /* 자식 스레드 구조체 NULL 초기화 */
+	struct list_elem* tmp_elem = list_begin(kid_list); /* 이동할 tmp_elem 포인터 */
+	struct list_elem* end = list_end(kid_list); /* kid_list의 끝을 가리키는 포인터*/
+		
+	/* ✔︎ 자식 리스트가 비어 있거나 호출한 부모의 자식이 아닌 경우 종료(-1 반환) */
+	if(list_empty(kid_list)){
+		return -1;
+	} else{
+		/* kid_list 끝까지 순회하며 child_tid를 소유하고 있는 자식 스레드가 있는지 찾는다 */
+		while(tmp_elem != end){
+			struct thread* tmp_t = list_entry(tmp_elem, struct thread, kid_elem);
+			if(tmp_t->tid == child_tid){
+				/* 자식 스레드가 존재한다면 child_t에 대입 */
+				child_t = tmp_t;
+				break;
+			}
+			/* elem 다음 포인터 이동 */
+			tmp_elem = list_next(tmp_elem);
+		}
+		if(!child_t){
+			return -1;
+		}
+	}
+
+	/* ✔︎ 같은 child_tid(자식) 프로세스에 대해 중복 wait()을 하지는 않았는지 */
+	if(child_t->wait_called){
+		return -1;
+	}else{
+		/* 중복 wait()이 아니라면 child_t->wait_called true 대입 */
+		child_t->wait_called = true;
+	}
+
+	/* ✔︎ child_tid(자식)의 프로세스가 실행 중인지 확인 → RUNNING, READY, BLOCKED 모두 포함 */
+	if(child_t->status == THREAD_RUNNING || child_t->status == THREAD_BLOCKED || child_t->status == THREAD_READY){	
+		/* sema_down() 함수를 이용해 자식이 종료될 때까지 대기 */
+		sema_down(&child_t->parent_wait_sema);
+	}
+
+	/* 자식 스레드의 수명이 종료되기 전에 부모 스레드의 지역 변수에 저장 */
+	int tmp_exit_status = child_t->exit_status;
+	/* list_remove()를 사용하여 kid_list에서 종료한 해당 자식 스레드만 제거 */
+	list_remove(tmp_elem);
+
+	sema_up(&child_t->child_wait_sema);
+
+	return tmp_exit_status; /* ✔︎ 종료 상태 반환 */
 }
 
 /* 프로세스를 종료한다. 이 함수는 thread_exit ()에서 호출된다. */
@@ -235,6 +373,12 @@ process_exit (void) {
 
 	if (curr->pml4 != NULL)
 		printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+	/* 프로세스를 종료하면서 대기하고 있던 부모의 BLOCKING을 깬다 */
+	sema_up(&curr->parent_wait_sema);
+
+	sema_down(&curr->child_wait_sema);
+
 	process_cleanup ();
 }
 

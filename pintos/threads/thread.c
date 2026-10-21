@@ -477,11 +477,23 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *); // rsp = t + 오프셋(4096 - 8)
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
-
 	/* ✔︎ 필드(base_priority, donations, waiting_lock, donate_elem) 초기화 by 🧝🏼KyleKim */
 	t->base_priority = t->priority;
 	t->waiting_lock = NULL;
 	list_init(&t->donations);
+
+	/* wait_called 필드 초기화 */
+	t->wait_called = false;
+	/* parent_wait_sema 필드 초기화 */
+	sema_init(&t->parent_wait_sema, 0);
+	/* child_wait_sema 필드 초기화 */
+	sema_init(&t->child_wait_sema, 0);
+  
+	/* fork 초기화 */
+	list_init(&t->kid_list);		/* 자식 목록: 처음엔 비어 있음 */
+	sema_init(&t->fork_sema, 0);	/* 0으로 시작해야 부모가 sema_down 하자마자 자식을 기다리며 잠듦 */
+	t->parents_if = NULL;			/* fork 호출 전에는 가리킬 레지스터 없음 */
+	t->success_flag = 0;			/* 0 = 아직 성공 안 함 (실패 기본값) */
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
