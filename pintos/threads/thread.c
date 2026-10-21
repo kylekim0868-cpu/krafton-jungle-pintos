@@ -482,6 +482,13 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->base_priority = t->priority;
 	t->waiting_lock = NULL;
 	list_init(&t->donations);
+
+	/* wait_called 필드 초기화 */
+	t->wait_called = false;
+	/* parent_wait_sema 필드 초기화 */
+	sema_init(&t->parent_wait_sema, 0);
+	/* child_wait_sema 필드 초기화 */
+	sema_init(&t->child_wait_sema, 0);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should

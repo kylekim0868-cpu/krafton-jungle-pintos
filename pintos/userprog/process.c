@@ -212,7 +212,7 @@ process_exec (void *f_name) {
  * 리턴한다. 커널에 의해 종료됐다면(즉, 예외로 인해 죽임을 당했다면)
  * -1을 리턴한다. TID가 유효하지 않거나, 호출한 프로세스의 자식이
  * 아니거나, 해당 TID에 대해 process_wait()가 이미 성공적으로
- * 호출된 적이 있다면, 기다리지 않고 즉시 -1을 리턴한다.
+ ㄱ다면, 기다리지 않고 즉시 -1을 리턴한다.
  *
  * 이 함수는 문제 2-2에서 구현한다. 지금은 아무 일도 하지 않는다. */
 int
@@ -220,8 +220,62 @@ process_wait (tid_t child_tid UNUSED) {
 	/* XXX: 힌트) process_wait(initd)가 리턴하면 pintos가 종료된다.
 	 * XXX:       process_wait를 구현하기 전까지는 여기에 무한 루프를
 	 * XXX:       넣어 두기를 권장한다. */
-	timer_sleep(100);
-	return -1;
+	/* ✔︎ 필요한 정보
+		- 종료 상태 보관할 변수
+		- 부모, 자식 간 관계 조회
+		- child_tid
+		- parent_tid
+		- exit_status
+	*/
+	/* ✔ child_tid(자식)가 호출한 parent_tid의 자식인지? */
+	struct thread* t = thread_current(); /* 실행 중인 스레드 */
+	struct list* kid_list = &t->kid_list; /* 부모 스레드의 자식 리스트 */
+	struct thread* child_t = NULL; /* 자식 스레드 구조체 NULL 초기화 */
+	struct list_elem* tmp_elem = list_begin(kid_list); /* 이동할 tmp_elem 포인터 */
+	struct list_elem* end = list_end(kid_list); /* kid_list의 끝을 가리키는 포인터*/
+		
+	/* ✔︎ 자식 리스트가 비어 있거나 호출한 부모의 자식이 아닌 경우 종료(-1 반환) */
+	if(list_empty(kid_list)){
+		return -1;
+	} else{
+		/* kid_list 끝까지 순회하며 child_tid를 소유하고 있는 자식 스레드가 있는지 찾는다 */
+		while(tmp_elem != end){
+			struct thread* tmp_t = list_entry(tmp_elem, struct thread, kid_elem);
+			if(tmp_t->tid == child_tid){
+				/* 자식 스레드가 존재한다면 child_t에 대입 */
+				child_t = tmp_t;
+				break;
+			}
+			/* elem 다음 포인터 이동 */
+			tmp_elem = list_next(tmp_elem);
+		}
+		if(!child_t){
+			return -1;
+		}
+	}
+
+	/* ✔︎ 같은 child_tid(자식) 프로세스에 대해 중복 wait()을 하지는 않았는지 */
+	if(child_t->wait_called){
+		return -1;
+	}else{
+		/* 중복 wait()이 아니라면 child_t->wait_called true 대입 */
+		child_t->wait_called = true;
+	}
+
+	/* ✔︎ child_tid(자식)의 프로세스가 실행 중인지 확인 → RUNNING, READY, BLOCKED 모두 포함 */
+	if(child_t->status == THREAD_RUNNING || child_t->status == THREAD_BLOCKED || child_t->status == THREAD_READY){	
+		/* sema_down() 함수를 이용해 자식이 종료될 때까지 대기 */
+		sema_down(&child_t->parent_wait_sema);
+	}
+
+	/* 자식 스레드의 수명이 종료되기 전에 부모 스레드의 지역 변수에 저장 */
+	int tmp_exit_status = child_t->exit_status;
+	/* list_remove()를 사용하여 kid_list에서 종료한 해당 자식 스레드만 제거 */
+	list_remove(tmp_elem);
+
+	sema_up(&child_t->child_wait_sema);
+
+	return tmp_exit_status; /* ✔︎ 종료 상태 반환 */
 }
 
 /* 프로세스를 종료한다. 이 함수는 thread_exit ()에서 호출된다. */
@@ -235,6 +289,12 @@ process_exit (void) {
 
 	if (curr->pml4 != NULL)
 		printf("%s: exit(%d)\n", curr->name, curr->exit_status);
+
+	/* 프로세스를 종료하면서 대기하고 있던 부모의 BLOCKING을 깬다 */
+	sema_up(&curr->parent_wait_sema);
+
+	sema_down(&curr->child_wait_sema);
+
 	process_cleanup ();
 }
 

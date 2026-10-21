@@ -16,6 +16,7 @@
 #include "threads/palloc.h"
 #include "devices/input.h"
 #include "threads/init.h"
+#include "userprog/process.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -36,6 +37,9 @@ void syscall_exit(int status);
 void syscall_seek(int fd, unsigned position);
 void syscall_close(int fd);
 void syscall_halt(void);
+
+/* 🧝🏼KyleKim wait기능 구현 */
+int syscall_wait(int pid);
 
 /* 시스템 콜.
  *
@@ -237,7 +241,8 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_EXEC: 
 			break;
-		case SYS_WAIT: 
+		case SYS_WAIT:
+			f->R.rax = syscall_wait(f->R.rdi);
 			break;
 		case SYS_CREATE: 
 			f->R.rax = syscall_create((const char *) f->R.rdi, (unsigned) f->R.rsi);
@@ -397,4 +402,37 @@ void syscall_close(int fd){
 /* power_off() 함수를 호출하여 Pintos 운영체제를 종료하는 함수 */
 void syscall_halt(void){
 	power_off();
+}
+
+/*
+ * 자식 프로세스 pid가 종료될 때까지 기다리고 자식의 종료 상태를 반환하는 함수.
+ *
+ * 기본 동작
+ *   1) 자식이 실행 중이면 종료될 때까지 기다린 뒤,
+ *      자식이 exit()에 전달한 상태 값을 반환한다.
+ *   2) 자식이 exit()를 호출하지 않고 커널에 의해 종료되었다면 -1을 반환한다.
+ *   3) 자식이 이미 종료되었어도 부모가 종료 상태를 받을 수 있어야 한다.
+ *
+ * 즉시 -1을 반환하는 경우
+ *   4) pid가 호출한 프로세스의 직접적인 자식이 아닌 경우.
+ *      - 성공한 fork()의 반환값으로 받은 pid만 직접적인 자식에 해당한다.
+ *      - 손자 프로세스는 기다릴 수 없으며, 고아 프로세스의 부모를 재지정하지 않는다.
+ *   5) 같은 자식에 대해 이미 wait()를 호출한 경우.
+ *      - 각 자식에 대한 wait()는 최대 한 번만 허용한다.
+ *
+ * 자원 및 수명 관리
+ *   6) 부모는 여러 자식을 원하는 순서로 기다리거나, 기다리지 않고 종료할 수 있다.
+ *   7) 부모의 wait() 호출 여부와 부모·자식의 종료 순서에 관계없이
+ *      각 프로세스의 모든 자원(struct thread 포함)은 해제되어야 한다.
+ *      단, 부모가 받아야 할 자식의 종료 상태는 필요한 동안 보존되어야 한다.
+ *   8) 최초 프로세스가 종료되기 전에는 Pintos가 종료되지 않아야 한다.
+*/
+int syscall_wait(int pid){
+	/* TODO: 자식 식별: 전달받은 pid가 어떤 자식인지 확인할 수 있다. */
+	/* TODO: 종료 상태 보관: 자식의 종료 상태 81을 부모가 받을 때까지 보존한다. */
+	/* TODO: 종료 대기: 자식이 실행 중이면 부모가 기다리고, 자식이 종료하면 대기를 끝낸다. */
+	/* TODO: 먼저 종료된 자식 처리: 자식이 먼저 종료했더라도 부모가 종료 상태를 받을 수 있다. */
+	/* TODO: 중복 호출 처리: 같은 자식에 대한 두 번째 wait()는 기다리지 않고 -1을 반환한다. */
+	/* TODO: 정보의 수명 보장: 부모가 종료 상태를 읽기 전에 필요한 정보가 해제되지 않아야 한다. */
+	return process_wait(pid);
 }
