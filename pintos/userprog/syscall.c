@@ -16,6 +16,8 @@
 #include "threads/palloc.h"
 #include "devices/input.h"
 #include "threads/init.h"
+#include "string.h"
+#include "userprog/process.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -32,6 +34,7 @@ int syscall_open(char *file);
 int syscall_filesize(int fd);
 int syscall_write(int fd, void *buffer, unsigned size);
 int syscall_read (int fd, void *buffer, unsigned size);
+int syscall_exec(const char *file);
 void syscall_exit(int status);
 void syscall_seek(int fd, unsigned position);
 void syscall_close(int fd);
@@ -218,6 +221,35 @@ syscall_seek(int fd, unsigned position) {
     lock_release(&filesys_lock);
 }
 
+int
+syscall_exec(const char *file) { /* 시작 주소 받기 */
+	/* 1. 명령 문자열 주소 검사 */
+	if (!valid_user_string(file)) {
+		syscall_exit(-1); /* thread_exit() 호출 */
+	}
+	
+	/* 기존 유저 메모리가 정리된 뒤에도 명령 문자열을 보관할 공간이 필요하기 때문에 할당합니다. */
+	char *command_copy = palloc_get_page(0); /* 커널 메모리 한 페이지, 4KB 할당 */
+
+	/* 2. 커널 페이지 할당 */
+	if (command_copy == NULL) {
+		syscall_exit(-1);
+	}
+
+	/* 3. 문자열 복사 및 길이 검사 */
+	if (strlcpy(command_copy, file, PGSIZE) >= PGSIZE) {
+		palloc_free_page(command_copy); /* 앞에서 할당한 페이지를 반납합니다. */
+		syscall_exit(-1);
+	}
+
+	/* 4. 프로그램 교체 및 실패 처리 */
+	if (process_exec(command_copy) == -1) { /* 실패했는지 확인 */
+		syscall_exit(-1); /* 실패 상태로 종료하라고 요청 */
+	}
+
+	NOT_REACHED();
+}
+
 /* 시스템 콜의 메인 인터페이스 */
 void
 syscall_handler (struct intr_frame *f) {
@@ -236,6 +268,7 @@ syscall_handler (struct intr_frame *f) {
 		case SYS_FORK: 
 			break;
 		case SYS_EXEC: 
+			f->R.rax = syscall_exec((const char *) f->R.rdi);
 			break;
 		case SYS_WAIT: 
 			break;

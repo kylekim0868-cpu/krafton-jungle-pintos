@@ -182,7 +182,7 @@ process_exec (void *f_name) {
 	 * 현재 스레드가 재스케줄될 때 실행 정보가 그 멤버에
 	 * 저장되기 때문이다. 그래서 로컬 변수 _if를 쓴다. */
 	struct intr_frame _if;
-	_if.ds = _if.es = _if.ss = SEL_UDSEG;
+	_if.ds = _if.es = _if.ss = SEL_UDSEG; /* 데이터·스택 관련 세그먼트 값들을 유저 모드용 값으로 설정합니다. */
 	_if.cs = SEL_UCSEG;
 	_if.eflags = FLAG_IF | FLAG_MBS;
 
