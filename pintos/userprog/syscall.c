@@ -17,6 +17,7 @@
 #include "devices/input.h"
 #include "threads/init.h"
 #include "userprog/process.h"
+#include "include/userprog/process.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -37,6 +38,10 @@ void syscall_exit(int status);
 void syscall_seek(int fd, unsigned position);
 void syscall_close(int fd);
 void syscall_halt(void);
+tid_t syscall_fork (const char *thread_name, struct intr_frame *f);
+
+/* 파일 이름을 종료 문자까지 안전하게 읽을 수 있는지 검사한다 */
+static bool valid_user_string(const char *str);
 
 /* 🧝🏼KyleKim wait기능 구현 */
 int syscall_wait(int pid);
@@ -53,6 +58,20 @@ int syscall_wait(int pid);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
+
+
+/* fork 시스템 콜의 입구.
+   thread_name : 자식 스레드 이름(유저 포인터), f : 시스템 콜 시점의 유저 레지스터
+   리턴 : 부모는 자식 tid, 실패하면 TID_ERROR (자식은 __do_fork에서 rax=0으로 따로 설정됨) */
+tid_t
+syscall_fork (const char *thread_name, struct intr_frame *f)
+{
+	/* 잘못된 유저 포인터(NULL, 커널 주소, 매핑 안 됨)는 -1 리턴이 아니라 프로세스 종료 */
+	if(!valid_user_string(thread_name))
+		syscall_exit(-1);
+	/* f를 넘기는 이유: 자식이 부모의 레지스터 상태를 그대로 복사해 가야 하기 때문 */
+	return process_fork(thread_name, f);
+}
 
 void 
 syscall_exit(int status){
@@ -237,7 +256,10 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_EXIT: 
 			syscall_exit(f->R.rdi);
-		case SYS_FORK: 
+			break;
+		case SYS_FORK:
+			/* rdi = 첫 번째 인자(자식 이름). 부모가 받을 리턴값(자식 tid)은 rax에 저장 */
+			f->R.rax = syscall_fork((char *)f->R.rdi, f);
 			break;
 		case SYS_EXEC: 
 			break;
@@ -280,13 +302,15 @@ syscall_handler (struct intr_frame *f) {
 /* 
 	fd_list 초기화 함수: 페이지를 할당받아 모든 페이지의 원소를 0으로 채워 초기화하는 동작
 */
-void fd_list_init(struct thread* t){
+bool fd_list_init(struct thread* t){
 	/* 페이지의 0을 채워 공간 할당 */
 	t->fd_list = palloc_get_page(PAL_ZERO);
+	/* 메모리 부족이면 false 리턴. 호출한 쪽(open/exec/fork)이 각자 상황에 맞게 실패 처리함
+	   (여기서 thread_exit을 하면 fork 중 부모가 sema_down에서 영원히 잠들 수 있어서 리턴만 함) */
 	if(!(t->fd_list)){
-		thread_exit(); /* 프로세스 종료 */
-		return -1;
+		return false;
 	}
+	return true;
 }
 
 int syscall_open(char* file_name)
@@ -300,7 +324,8 @@ int syscall_open(char* file_name)
 
 	/* fd테이블이 비었다면 페이지 전체를 NULL로 초기화 */
 	if(!t->fd_list){
-		fd_list_init(t);
+		if(!fd_list_init(t))
+			return -1;
 	}
 
 	/* 문자열 시작 주소에서 끝 문자열까지만 접근했는지 판단 */
