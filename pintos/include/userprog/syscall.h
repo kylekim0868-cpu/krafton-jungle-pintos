@@ -10,7 +10,7 @@ void syscall_init (void);
 
 int syscall_open(char *file);
 int syscall_filesize(int fd);
-void fd_list_init(struct thread* t);
+bool fd_list_init(struct thread* t);
 /* read  system call */
 int syscall_read (int fd, void *buffer, unsigned size);
 /* write system call */

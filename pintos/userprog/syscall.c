@@ -18,6 +18,8 @@
 #include "threads/init.h"
 #include "string.h"
 #include "userprog/process.h"
+#include "userprog/process.h"
+#include "include/userprog/process.h"
 
 /* 공용 락 선언 */
 struct lock filesys_lock;
@@ -39,6 +41,13 @@ void syscall_exit(int status);
 void syscall_seek(int fd, unsigned position);
 void syscall_close(int fd);
 void syscall_halt(void);
+tid_t syscall_fork (const char *thread_name, struct intr_frame *f);
+
+/* 파일 이름을 종료 문자까지 안전하게 읽을 수 있는지 검사한다 */
+static bool valid_user_string(const char *str);
+
+/* 🧝🏼KyleKim wait기능 구현 */
+int syscall_wait(int pid);
 
 /* 시스템 콜.
  *
@@ -52,6 +61,20 @@ void syscall_halt(void);
 #define MSR_STAR 0xc0000081         /* 세그먼트 셀렉터 MSR */
 #define MSR_LSTAR 0xc0000082        /* Long mode에서 SYSCALL이 점프할 목적지 */
 #define MSR_SYSCALL_MASK 0xc0000084 /* eflags용 마스크 */
+
+
+/* fork 시스템 콜의 입구.
+   thread_name : 자식 스레드 이름(유저 포인터), f : 시스템 콜 시점의 유저 레지스터
+   리턴 : 부모는 자식 tid, 실패하면 TID_ERROR (자식은 __do_fork에서 rax=0으로 따로 설정됨) */
+tid_t
+syscall_fork (const char *thread_name, struct intr_frame *f)
+{
+	/* 잘못된 유저 포인터(NULL, 커널 주소, 매핑 안 됨)는 -1 리턴이 아니라 프로세스 종료 */
+	if(!valid_user_string(thread_name))
+		syscall_exit(-1);
+	/* f를 넘기는 이유: 자식이 부모의 레지스터 상태를 그대로 복사해 가야 하기 때문 */
+	return process_fork(thread_name, f);
+}
 
 void 
 syscall_exit(int status){
@@ -265,12 +288,16 @@ syscall_handler (struct intr_frame *f) {
 			break;
 		case SYS_EXIT: 
 			syscall_exit(f->R.rdi);
-		case SYS_FORK: 
+			break;
+		case SYS_FORK:
+			/* rdi = 첫 번째 인자(자식 이름). 부모가 받을 리턴값(자식 tid)은 rax에 저장 */
+			f->R.rax = syscall_fork((char *)f->R.rdi, f);
 			break;
 		case SYS_EXEC: 
 			f->R.rax = syscall_exec((const char *) f->R.rdi);
 			break;
-		case SYS_WAIT: 
+		case SYS_WAIT:
+			f->R.rax = syscall_wait(f->R.rdi);
 			break;
 		case SYS_CREATE: 
 			f->R.rax = syscall_create((const char *) f->R.rdi, (unsigned) f->R.rsi);
@@ -308,13 +335,15 @@ syscall_handler (struct intr_frame *f) {
 /* 
 	fd_list 초기화 함수: 페이지를 할당받아 모든 페이지의 원소를 0으로 채워 초기화하는 동작
 */
-void fd_list_init(struct thread* t){
+bool fd_list_init(struct thread* t){
 	/* 페이지의 0을 채워 공간 할당 */
 	t->fd_list = palloc_get_page(PAL_ZERO);
+	/* 메모리 부족이면 false 리턴. 호출한 쪽(open/exec/fork)이 각자 상황에 맞게 실패 처리함
+	   (여기서 thread_exit을 하면 fork 중 부모가 sema_down에서 영원히 잠들 수 있어서 리턴만 함) */
 	if(!(t->fd_list)){
-		thread_exit(); /* 프로세스 종료 */
-		return -1;
+		return false;
 	}
+	return true;
 }
 
 int syscall_open(char* file_name)
@@ -328,7 +357,8 @@ int syscall_open(char* file_name)
 
 	/* fd테이블이 비었다면 페이지 전체를 NULL로 초기화 */
 	if(!t->fd_list){
-		fd_list_init(t);
+		if(!fd_list_init(t))
+			return -1;
 	}
 
 	/* 문자열 시작 주소에서 끝 문자열까지만 접근했는지 판단 */
@@ -430,4 +460,37 @@ void syscall_close(int fd){
 /* power_off() 함수를 호출하여 Pintos 운영체제를 종료하는 함수 */
 void syscall_halt(void){
 	power_off();
+}
+
+/*
+ * 자식 프로세스 pid가 종료될 때까지 기다리고 자식의 종료 상태를 반환하는 함수.
+ *
+ * 기본 동작
+ *   1) 자식이 실행 중이면 종료될 때까지 기다린 뒤,
+ *      자식이 exit()에 전달한 상태 값을 반환한다.
+ *   2) 자식이 exit()를 호출하지 않고 커널에 의해 종료되었다면 -1을 반환한다.
+ *   3) 자식이 이미 종료되었어도 부모가 종료 상태를 받을 수 있어야 한다.
+ *
+ * 즉시 -1을 반환하는 경우
+ *   4) pid가 호출한 프로세스의 직접적인 자식이 아닌 경우.
+ *      - 성공한 fork()의 반환값으로 받은 pid만 직접적인 자식에 해당한다.
+ *      - 손자 프로세스는 기다릴 수 없으며, 고아 프로세스의 부모를 재지정하지 않는다.
+ *   5) 같은 자식에 대해 이미 wait()를 호출한 경우.
+ *      - 각 자식에 대한 wait()는 최대 한 번만 허용한다.
+ *
+ * 자원 및 수명 관리
+ *   6) 부모는 여러 자식을 원하는 순서로 기다리거나, 기다리지 않고 종료할 수 있다.
+ *   7) 부모의 wait() 호출 여부와 부모·자식의 종료 순서에 관계없이
+ *      각 프로세스의 모든 자원(struct thread 포함)은 해제되어야 한다.
+ *      단, 부모가 받아야 할 자식의 종료 상태는 필요한 동안 보존되어야 한다.
+ *   8) 최초 프로세스가 종료되기 전에는 Pintos가 종료되지 않아야 한다.
+*/
+int syscall_wait(int pid){
+	/* TODO: 자식 식별: 전달받은 pid가 어떤 자식인지 확인할 수 있다. */
+	/* TODO: 종료 상태 보관: 자식의 종료 상태 81을 부모가 받을 때까지 보존한다. */
+	/* TODO: 종료 대기: 자식이 실행 중이면 부모가 기다리고, 자식이 종료하면 대기를 끝낸다. */
+	/* TODO: 먼저 종료된 자식 처리: 자식이 먼저 종료했더라도 부모가 종료 상태를 받을 수 있다. */
+	/* TODO: 중복 호출 처리: 같은 자식에 대한 두 번째 wait()는 기다리지 않고 -1을 반환한다. */
+	/* TODO: 정보의 수명 보장: 부모가 종료 상태를 읽기 전에 필요한 정보가 해제되지 않아야 한다. */
+	return process_wait(pid);
 }

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/interrupt.h"
+#include "threads/synch.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -100,11 +101,29 @@ struct thread {
 	struct list_elem donate_elem; /* 기부자 목록용 list_elem ★ 기부용 list_elem을 만든 이유는 한 스레드가 동시에 락 대기목록/우선순위 기부목록에 저장되어야 하기 때문이다 */
 	struct file** fd_list; /* 파일 포인터 배열(FD 테이블) */
 
+	 /* fork, wait 시스템 콜 전용 필드 */
+    struct intr_frame *parents_if;  /* fork시점 부모 프로세스 */
+	struct semaphore parent_wait_sema; /* 부모가 기다리는 wait sema */
+	struct semaphore child_wait_sema; /* 자식이 기다리는 wait sema */
+    struct semaphore fork_sema; /* fork됬는지 확인 */
+	bool wait_called; /* wait 호출여부 저장 */
+    int success_flag;               /* fork 성공여부 저장 */
+    struct list kid_list;           /* 자식 대기 리스트 */
+    struct list_elem kid_elem;      /* 자식 elem - 연결용 */
+
 	/* Shared between thread.c and synch.c. */
 	struct list_elem elem;              /* List element. */
 
 	/* 종료용 필드 */
 	int exit_status;
+
+	/* fork, wait 시스템 콜 전용 필드 */
+	struct intr_frame *parents_if;	/* fork 시점 부모의 유저 레지스터(intr_frame) 포인터.
+									   부모가 저장하고, 자식이 __do_fork에서 복사해 감 */
+	struct semaphore fork_sema;	/* 초기값 0. 부모는 sema_down으로 잠들고, 자식이 복제를 마치면(성공/실패 모두) sema_up으로 깨움 */
+	int success_flag;				/* 복제 결과. 부모가 0으로 리셋 → 자식이 성공 시 1로 설정 → 부모가 깨어나서 확인 */
+	struct list kid_list;			/* 이 스레드가 fork로 만든 자식들의 목록 (wait에서 tid로 자식을 찾을 때 사용) */
+	struct list_elem kid_elem; 		/* 이 스레드가 "부모의 kid_list"에 연결될 때 쓰는 리스트 원소 */
 
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
